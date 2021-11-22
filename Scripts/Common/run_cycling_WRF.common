@@ -1,133 +1,143 @@
 #!/bin/bash
-###                                                                                     ##
-###   ***   Everything below this line was inserted from run_cycling_WRF.common   ***   ##
-###                                                                                     ##
 
-# see run_cycling.environment script for environment variables
+# ========================================================================================
+# ========= Everything below this line was inserted from run_cycling_WRF.common ==========
+# ========================================================================================
 
-# set -e # abort if anything goes wrong
-ERR=0 # initialize Error counter
 
-# launch feedback
+# See run_cycling.environment script for environment variables.
+
+
+# Initialize Error counter
+ERR=0 
+
+# Display some info: hostname, uname and JOBNAME
 echo
+echo "   ================================== Preliminary Info ==================================   "
+echo
+echo -n "   hostname: "
 hostname
+echo -n "   uname: "
 uname
 echo
-echo "   ***   ${JOBNAME}   ***   "
+echo "   ================================== JOBNAME = ${JOBNAME} ==================================   "
 echo
 
-# check if $NEXTSTEP is set, and exit, if not
+# Check if $NEXTSTEP is set, and exit, if not
 if [[ -z "${NEXTSTEP}" ]]; then
-  echo 'Environment variable $NEXTSTEP not set - aborting!'
+  echo '   Environment variable $NEXTSTEP not set - aborting!'
   exit 1
 fi
-CURRENTSTEP="${NEXTSTEP}" # $NEXTSTEP will be overwritten
+
+# Set current step
+CURRENTSTEP="${NEXTSTEP}" 
 export NEXTSTEP
 export CURRENTSTEP
+# NOTE: $NEXTSTEP will be overwritten.
 
-# more WRF settings (before machine setup!)
-export NODES=${WRFNODES} # number of nodes or processes (depending on system)
-export RUNWRF=1 # more options: $WRFIN, $WRFOUT, $TABLES
-export RUNREAL=0 # more options: $RUNREAL, $RAMIN, $RAMOUT, $REALIN, $REALOUT
-export PYTHONVERSION=3 # pyWPS et al. are now converted to Python 3
+# More WRF settings (before machine setup)
+export NODES=${WRFNODES} # Number of nodes or processes (depending on system).
+export RUNWRF=1 
+# NOTE: Some more related options are: $WRFIN, $WRFOUT and $TABLES.
+export RUNREAL=0 
+# NOTE: Some more related options are: $RAMIN, $RAMOUT, $REALIN and $REALOUT.
+export PYTHONVERSION=3 # pyWPS and the related/similar files are now converted to Python 3.
 
-# setup job environment
+# Setup environment
 cd "${INIDIR}"
-source "${SCRIPTDIR}/setup_WRF.sh" # load machine-specific stuff
+source "${SCRIPTDIR}/setup_WRF.sh" # Load machine-specific stuff.
 
-## run WPS/pre-processing for next step
-# read next step from stepfile
+# ========================== Run WPS/pre-processing for next step ================================
+# Find next step using cycling.py and CURRENTSTEP
 NEXTSTEP=$(python "${SCRIPTDIR}/cycling.py" "${CURRENTSTEP}")
-
-# launch pre-processing for next step
-eval "${SCRIPTDIR}/launchPreP.sh" # primarily for WPS and real.exe
-ERR=$(( ${ERR} + $? )) # capture exit code
-# need to unset $NOWPS, so the next WRF step will submit a WPS job again
+# Launch pre-processing for next step
+eval "${SCRIPTDIR}/launchPreP.sh" # Primarily for WPS and real.exe.
+ERR=$(( ${ERR} + $? )) # Capture exit code and add to ${ERR}.
+# Unset $NOWPS
 export NOWPS=''
+# NOTE: We need to unset $NOWPS, so the next WRF step will submit a WPS job again.
 
-
-## run WRF for this step
-# start timing
+# ========================== Run WRF for this step ================================
+# Prompt on the screen
 echo
-echo "   ***   Launching WRF for current step: ${CURRENTSTEP}   ***   "
+echo "   ================================== Launching WRF for current step: ${CURRENTSTEP} ================================== "
+echo -n -e "\n   "
 date
-echo
-
-# N.B.: work in existing working folder, created by caller instance;
-# i.e. don't remove namelist files in working directory!
-
-# run execution script
+# NOTE: The date command is used to display the system date and time.
+# NOTE: We should work in existing working folder, created by caller instance.
+#   We shouldn't remove namelist files in working directory.
+# Run execution script
 eval "${SCRIPTDIR}/execWRF.sh"
-ERR=$(( ${ERR} + $? )) # capture exit code
-# mock restart files for testing (correct linking)
-# ERR=0 # pretend execution was successful
-#if [[ -n "${NEXTSTEP}" ]]; then
-#	touch "${WORKDIR}/wrfrst_d01_${NEXTSTEP}_00"
-#	touch "${WORKDIR}/wrfrst_d01_${NEXTSTEP}_01"
-#fi
+ERR=$(( ${ERR} + $? )) # Capture exit code and add to ${ERR}.
 
 
-## reload machine setup (might have changed in the meantime)
+# ================ Reload machine setup (might have changed in the meantime) ======================
+# Prompt on the screen
+echo "   ================================== Reload machine setup (allows easy machine swithing between steps) ================================== "
+echo
+# Move into INIDIR
 cd "${INIDIR}"
-# reset variables that pertain to starting the next job
-# (do not change archive and averaging settings)
-unset WAITFORWPS RESUBJOB SLEEPERJOB
-source "${SCRIPTDIR}/setup_WRF.sh" # load machine-specific stuff
-# N.B.: this is basically to allow seamless machine switching between steps
+# Reset variables that pertain to starting the next job
+#   (do not change archiving and averaging settings)
+unset WAITFORWPS RESUBJOB SLEEPERJOB PYTHONPATH
+# Load machine-specific stuff again
+source "${SCRIPTDIR}/setup_WRF.sh" 
+# NOTE: This is basically to allow seamless machine switching between steps.
 
-
-## check exit code and abort if error occurred
+# ================ Check exit code and act accordingly ======================  
+# If error code is non-zero
 if [[ $ERR != 0 ]]; then
-
-  # end timing
+  # Prompt on screen
   echo
-  echo "   ###   WARNING: WRF step ${CURRENTSTEP} failed   ###   "
-  echo "   (Leaving Working Directory ${WORKDIR} intact.)"
+  echo "   ======================= WARNING: WRF step ${CURRENTSTEP} failed (leaving Working Directory ${WORKDIR} intact) ======================="
+  echo -n -e "\n   "
   date
   echo  
-  
-  # launch crash handler script (mostly for auto-restart)
-  export RSTCNT # export restart counter 
-  eval "${SCRIPTDIR}/crashHandler.sh" # restart job with smaller time-step
-  ERR=$(( ${ERR} + $? )) # capture exit code
-  
-else # only if WRF completed successfully
-
-  # end timing
+  # Export restart counter 
+  export RSTCNT   
+  # Launch crash handler script   
+  eval "${SCRIPTDIR}/crashHandler.sh" # Restart job with smaller time-step.
+  ERR=$(( ${ERR} + $? )) # Capture exit code and add to ${ERR}.
+# If WRF completed successfully  
+else
+  # Prompt on screen
   echo
-  echo "   ***   WRF step ${CURRENTSTEP} completed   ***   "
+  echo "   ================================== WRF step ${CURRENTSTEP} completed =================================="
+  echo -n -e "\n   "
   date
-  echo
-
-
-  ## launch post-processing
-  eval "${SCRIPTDIR}/launchPostP.sh" # mainly archiving, but may include actual post-processing
-  ERR=$(( ${ERR} + $? )) # capture exit code
-
-
-  ## resubmit job for next step
-  export RSTCNT=0 # reset restart counter
-  eval "${SCRIPTDIR}/resubJob.sh" # requires submission command from setup script
-  ERR=$(( ${ERR} + $? )) # capture exit code
-
-
-  # # copy driver script into work dir to signal completion
-  # cp "${INIDIR}/${WRFSCRIPT}" "${WORKDIR}"
-
-  # remove working directory if everything was successful
-  echo
+  # Launch post-processing
+  eval "${SCRIPTDIR}/launchPostP.sh" # Mainly archiving, but may include actual post-processing.
+  ERR=$(( ${ERR} + $? )) # Capture exit code and add to ${ERR}.
+  # Reset restart counter
+  export RSTCNT=0
+  # Resubmit job for next step   
+  eval "${SCRIPTDIR}/resubJob.sh" 
+  ERR=$(( ${ERR} + $? )) # Capture exit code and add to ${ERR}.
+  # Display extra line
+  echo  
+  # Remove working directory if everything was successful  
   cd "${INIDIR}"
   if [[ $ERR == 0 ]]; then
-    # the check is probably unnecessary here, but it doesn't hurt
-    echo "Removing Working Directory: ${WORKDIR}"
+    echo "   Removing Working Directory: ${WORKDIR}."
     rm -rf "${WORKDIR}"
     echo
   else
-    echo "WARNING: ${ERR} Error(s) encountered after WRF completed!!!"
-    echo "(Leaving Working Directory ${WORKDIR} intact.)"
+    echo "   WARNING: ${ERR} Error(s) encountered after WRF completed!!!"
+    echo "   Leaving Working Directory ${WORKDIR} intact."
     echo
-  fi # if no $ERR
+  fi 
+fi 
 
-fi # if error
+# ================ Exit with number of errors as exit code ====================== 
+exit ${ERR} 
 
-exit ${ERR} # exit with number of errors as exit code
+
+
+
+
+
+
+
+
+
+

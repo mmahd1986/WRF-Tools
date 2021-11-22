@@ -1,144 +1,177 @@
 #!/bin/bash
-# script to resubmit next job after current job completed
-# Andre R. Erler, 28/02/2013
+
+# Script to resubmit next job after current job completed.
+# Andre R. Erler, 28/02/2013.
+
 
 # The following environment variables have to be set by the caller:
 # INIDIR, RSTDIR, WRFSCRIPT, RESUBJOB, NEXTSTEP, NOWPS
 
-# set default for $NOWPS and $RSTCNT, to avoid problems when passing variable to next job
-NOWPS=${NOWPS:-'WPS'} # i.e. launch WPS, unless instructed otherwise
-RSTCNT=${RSTCNT:-0} # assume no restart by default
-# $NEXTSTEP is handled below
 
-## launch WRF for next step (if $NEXTSTEP is not empty)
+# Set default for $NOWPS and $RSTCNT (to avoid problems when passing variables to next job)
+NOWPS=${NOWPS:-'WPS'} # Launch WPS, unless instructed otherwise.
+RSTCNT=${RSTCNT:-0} # Assume no restart by default.
+# NOTE: $NEXTSTEP is handled below.
+
+# Launch WRF for next step (if $NEXTSTEP is not empty)
 if [[ -n "${NEXTSTEP}" ]]
-  then
+then
 
-   # read date string for restart file
-    RSTDATE=$(sed -n "/${NEXTSTEP}/ s/${NEXTSTEP}[[:space:]]\+'\([-_\:0-9]\{19\}\)'[[:space:]]\+'[-_\:0-9]\{19\}'$/\1/p" stepfile)
-    # N.B.: '[[:space:]]' also matches tabs; '\ ' only matches one space; '\+' means one or more
-    # some code to catch sed errors on TCS
-    if [[ -z "${RSTDATE}" ]]
-      then 
-        echo '   ###   ERROR: cannot read step file - aborting!   ###   '
-        # print some diagnostics
-        echo
-        echo 'Current PATH variable:'
-        echo "${PATH}"
-        echo
-        echo 'sed executable:'
-        which sed
-        echo
-        echo 'Stepfile line:'
-        grep "${NEXTSTEP}" stepfile        
-        echo
-        echo 'stepfile stat:'
-        stat stepfile
-        echo
-        exit 1
-    fi # RSTDATE
-#    while [[ -z "${RSTDATE}" ]] 
-#      do # loop appears to be necessary to prevent random read errors on TCS
-#       	echo ' Error: could not read stepfile - trying again!'
-#        RSTDATE=$(sed -n "/${NEXTSTEP}/ s/${NEXTSTEP}[[:space:]].\(.*\).[[:space:]].*$/\1/p" stepfile)
-#      	sleep 600 # prevent too much file access
-#    done
-    NEXTDIR="${INIDIR}/${NEXTSTEP}" # next $WORKDIR
-    cd "${NEXTDIR}"
-    # link restart files
+  # Read date string for restart file
+  RSTDATE=$(sed -n "/${NEXTSTEP}/ s/${NEXTSTEP}[[:space:]]\+'\([-_\:0-9]\{19\}\)'[[:space:]]\+'[-_\:0-9]\{19\}'$/\1/p" stepfile)
+  # NOTE: \+ is as *, but matches one or more.
+  # NOTE: [-_\:0-9] means any of - or _ or : or 0-9.
+  # NOTE: \{19\} means the previous charachter, etc, but 19 times. 
+  # NOTE: '[[:space:]]' also matches tabs; '\ ' only matches one space.   
+    
+  # If we could not find ${RSTDATE}
+  if [[ -z "${RSTDATE}" ]]
+  then 
     echo
-    echo "Linking restart files to next working directory:"
-    echo "${NEXTDIR}"
-    for RESTART in "${RSTDIR}"/wrfrst_d??_${RSTDATE//:/[_:]}; do # match hh:mm:ss and hh_mm_ss
-      ln -sf "${RESTART}"; done  
-    
-    # check for WRF input files (in next working directory)
-    # N.B.: this option can potentially waste a lot of walltime and should be used with caution
-    if [[ "${WAITFORWPS}" == 'WAIT' ]] &&  [[ ! -f "${WPSSCRIPT}" ]]
-		  then
-		    echo
-		    echo "   ***   Waiting for WPS to complete...   ***"
-		    echo
-		    while [[ ! -f "${WPSSCRIPT}" ]]; do
-		       sleep 30 # need faster turnover to submit next step
-		    done
-		fi # $WAITFORWPS
+    echo '   ERROR: Cannot read step file - aborting!   '
+    echo
+    echo '   Current PATH variable:'
+    echo -n '   '
+    echo "${PATH}"
+    echo
+    echo '   sed executable:'
+    echo -n '   '
+    which sed
+    echo
+    echo '   Stepfile line:'
+    echo -n '   '
+    grep "${NEXTSTEP}" stepfile        
+    echo
+    echo '   stepfile stat:'
+    stat stepfile
+    echo
+    exit 1
+  fi 
 
+  # Move into next work dir  
+  NEXTDIR="${INIDIR}/${NEXTSTEP}" 
+  cd "${NEXTDIR}"
     
-    # go back to initial directory
-    cd "${INIDIR}"            
+  # Prompt on screen
+  echo
+  echo "   ================================== Linking restart files to next working directory =================================="
+  echo
+  echo -n '   Next working directory: '
+  echo "${NEXTDIR}"
+  
+  # Link restart files
+  for RESTART in "${RSTDIR}"/wrfrst_d??_${RSTDATE//:/[_:]}; do 
+  # NOTE: ${parameter/pattern/string} replaces the first occurrence of a pattern 
+  #   with a given string. To replace all occurrences, we use ${parameter//pattern/string}. 
+  # NOTE: The above matches both hh:mm:ss and hh_mm_ss.
+    ln -sf "${RESTART}"; done  
+    
+  # Wait for the WPS to complete
+  # NOTE: This option can potentially waste a lot of wall time and should be used with caution.
+  if [[ "${WAITFORWPS}" == 'WAIT' ]] &&  [[ ! -f "${WPSSCRIPT}" ]]
+  # NOTE: The -f verifies two things: The provided path exists and is a regular file. 		  
+  then
+    echo
+    echo "   Waiting for WPS to complete ... "
+    while [[ ! -f "${WPSSCRIPT}" ]]; do
+      sleep 30 
+    done
+  fi
+  # NOTE: The above method was the initial choice for waiting for WPS to finish before moving on,
+  #   when WRF TOOLS was first developed. However, this leads to a lot of cpus waiting for a 
+  #   potentially long time. So Andre changed this. WAITFORWPS is now not 'WAIT' by default and 
+  #   the method in the next IF is used to submit a sleeper job that waits ON A SINGLE PROCESS
+  #   until the WPS has finished running (much less costly). This is done through running startCycle
+  #   and using QWAIT to check when the WPS is done. WPS is not ran again (--skipwps option is used
+  #   inside sleeper job submission), but after the wait is over next step WPS is ran and then WRF.   
+
+  # Go back to initial directory
+  cd "${INIDIR}"            
                         
-    # now, decide what to do...
-    if [[ -f "${NEXTDIR}/${WPSSCRIPT}" ]]
-      then
-        
-        if [ 0 -lt $(grep -c 'SUCCESS COMPLETE REAL_EM INIT' "${NEXTDIR}/real/rsl.error.0000") ]
-          then
+  # If WPS has finished
+  if [[ -f "${NEXTDIR}/${WPSSCRIPT}" ]]
+  then
+    
+    # If we find that REAL ran successfully    
+    if [ 0 -lt $(grep -c 'SUCCESS COMPLETE REAL_EM INIT' "${NEXTDIR}/real/rsl.error.0000") ]
+    then
             
-				    # submit next job (start next cycle)
-				    echo
-				    echo "   ***   Launching WRF for next step: ${NEXTSTEP}   ***   "
-				    echo
-            ## waiting to allow filesystem to update
-            #echo
-            #echo "   ---   Waiting 30 min. to allow file system to update   ---   "
-            #echo 
-            #sleep 1800 # wait 30 min.
-				    # execute submission command (set in setup-script; machine-specific)
-				    #eval "echo ${RESUBJOB}" # print command; now done with set -x
-				    set -x
-				    eval "${RESUBJOB}" # execute command
-            ERR=$? # capture exit status
-				    set +x
-				    exit $? # exit with exit status from reSubJob
+      # Prompt on screen
+      echo
+      echo "   ================================== Launching WRF for next step: ${NEXTSTEP} =================================="
+      echo
+      
+      # Submit next job (start next cycle)      
+      set -x
+      # NOTE: "set -x" prints commands and their arguments as they are executed.
+      eval "${RESUBJOB}" 
+      ERR=$? # Capture exit status.
+      set +x
+      # NOTE: In set, using + rather than - causes flags to be turned off.
+      exit $? # Exit with exit status from reSubJob.
 				    
-		    else # WPS crashed
+    # If we find that REAL did not run successfully
+    else 
 
-            # do not continue 
-            echo
-            echo "   ###   WPS for next step (${NEXTSTEP}) failed --- aborting!   ###   "
-            echo
-			  	  exit 1
+      # Prompt on screen and exit
+      echo
+      echo "   WPS for next step (${NEXTSTEP}) failed --- aborting! "
+      echo
+      exit 1
 		    
-	      fi # if WPS successful
+    fi 
 		
-    else # WPS not finished (yet)
+  # If WPS has not finished (yet)
+  else 
 	    
-		    # start a sleeper job, if available
-        if [[ -n "{SLEEPERJOB}" ]]
-          then
+    # Start a sleeper job, if available
+    if [[ -n "{SLEEPERJOB}" ]]
+    then
             
-		        # submit next job (start next cycle)
-            echo
-            echo "   ---      WPS for next step (${NEXTSTEP}) has not finished yet     ---   "
-            echo "   +++   Launching sleeper job to restart WRF when WPS finished   +++   "
-            echo "            (see log file below for details and job status)   "
-            echo
-            # submit sleeper script (set in setup-script; machine-specific)
-            set -x
-            eval "${SLEEPERJOB}" # execute command
-            ERR=$? # capture exit status
-            set +x
-            exit $? # exit with exit status from reSubJob
+      # Prompt on screen
+      echo
+      echo "   WPS for next step (${NEXTSTEP}) has not finished yet. "
+      echo "   Launching sleeper job to restart WRF when WPS finishes. "
+      echo "   See log file below for details and job status. "
+      echo
+            
+      # Submit sleeper script (set in setup-script; machine-specific)
+      set -x
+      eval "${SLEEPERJOB}" 
+      ERR=$? # Capture exit status.
+      set +x
+      exit $? # Exit with exit status from SLEEPERJOB.
 		    
-        else # WPS did not run - abort
+    # If we can not start a sleeper job
+    else 
 
-            # do not continue 
-            echo
-            echo "   ###   WPS for next step (${NEXTSTEP}) failed --- aborting!   ###   "
-            echo
-            exit 1
+      # Prompt on screen and exit 
+      echo
+      echo "   WPS for next step (${NEXTSTEP}) failed --- aborting! "
+      echo
+      exit 1
                         
-        fi # if sleeper job
+    fi 
 		    		  
-    fi # if WPS finished...
+  fi 
     
+# If $NEXTSTEP is empty
 else
   
-	  echo
-	  echo '   ===   No $NEXTSTEP --- cycle terminated.   ===   '
-	  echo '         (no more jobs have been submitted)   '
-	  echo
-	  exit 0 # most likely this is OK
+  # Prompt on screen and exit
+  echo
+  echo '   No $NEXTSTEP --- cycle terminated. '
+  echo '   No more jobs have been submitted. '
+  echo
+  exit 0 # This is most likely Ok.
 
-fi # $NEXTSTEP
+fi 
+
+
+
+
+
+
+
+
+

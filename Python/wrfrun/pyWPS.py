@@ -1,56 +1,74 @@
 #!/usr/bin/python
 
-'''
-Created on 2012-03-20
-Revised on 2013-03-19
+# ===============================================================================
+# === Script to prepare input data from various sources (including CESM/CCSM) === 
+# === and run the WPS/metgrid.exe tool chain, in order to generate input data === 
+# === for WRF/real.exe.                                                       ===
+# ===                                                                         ===
+# === Created on 2012-03-20.                                                  ===
+# === Revised on 2013-03-19.                                                  ===
+# ===                                                                         ===
+# === Author: Andre R. Erler                                                  ===
+# ===============================================================================              
 
-Script to prepare input data from various sources (including CESM/CCSM) and run the 
-WPS/metgrid.exe tool chain, in order to generate input data for WRF/real.exe
 
-@author: Andre R. Erler
-'''
+# =================================================================================
+# =================================== Imports =====================================
+# =================================================================================
 
-##  imports
-import os # directory operations
-import shutil # copy and move
-import re # regular expressions
-import subprocess # launching external programs
-import multiprocessing # parallelization
-import string # to iterate over alphabet...
-import datetime as dt  #datelist construction
-# my modules
+# System modules
+import os # Directory operations.
+import shutil # Copy and move.
+import re # Regular expressions.
+import subprocess # Launching external programs.
+import multiprocessing # Parallelization.
+import string # To iterate over alphabet.
+import datetime as dt # Datelist construction.
+
+# Andre's modules
 import wrfrun.namelist_time as nlt
-# module to call cdb_query
-from wrfrun.call_cdb_query import apply_cdb_query_singleWPSstep
+from wrfrun.call_cdb_query import apply_cdb_query_singleWPSstep # Module to call cdb_query.
 
-##  Default Settings (may be overwritten by in meta/namelist.py)
+
+# =================================================================================
+# ========= Default settings (may be overwritten by in meta/namelist.py) ==========
+# =================================================================================
+
 Alphabet = string.ascii_uppercase
+# NOTE: In Python3, ascii_uppercase is a pre-initialized string used as string constant. 
+#   String ascii_uppercase will give the uppercase letters ‘ABCDEFGHIJKLMNOPQRSTUVWXYZ’.
+
+# tmp and meta folders
 tmp = 'tmp/'
 meta = 'meta/'
-# metgrid (this is all hard coded into metgrid)
-nmlform = '{:04d}-{:02d}-{:02d}_{:02d}:00:00' # date in namelist.wps
-imform = '{:04d}-{:02d}-{:02d}_{:02d}' # date in IM filename
+
+# Metgrid settings (this is all hard coded into metgrid)
+nmlform = '{:04d}-{:02d}-{:02d}_{:02d}:00:00' # Date in namelist.wps.
+# NOTE: In python format, 'd' means decimal integer. 
+imform = '{:04d}-{:02d}-{:02d}_{:02d}' # Date in IM filename.
 impfx = 'FILE:'
 metpfx = 'met_em.d{:02d}.'
 metsfx = ':00:00.nc'
 geopfx = 'geo_em.d{:02d}'
-# parallelization
+
+# Parallelization
 pname = 'proc{:02d}'
 pdir = 'proc{:02d}/'
-# destination folder(s)
-ramlnk = 'ram' # automatically generated link to ramdisk (if applicable)
-data = 'data/' # data folder in ram
-ldata = True # whether or not to keep data in memory; can be set with environment variables
-disk = 'data/' # destination folder on hard disk
-Disk = '' # default: Root + disk
-ldisk = False # don't write metgrid files to hard disk; can be set with environment variables
-## Commands
-# metgrid
+# Do we alwyas use <100 processes? ?????
+
+# Destination folder(s)
+ramlnk = 'ram' # Automatically generated link to ramdisk (if applicable).
+data = 'data/' # Data folder in ram.
+ldata = True # Whether or not to keep data in memory; can be set with environment variables.
+disk = 'data/' # Destination folder on hard disk.
+Disk = '' # Absolute disk path (later '' is overwritten as root + disk). 
+ldisk = False # Don't write metgrid files to hard disk; can be set with environment variables.
+
+# Other metgrid related settings
 metgrid_exe = 'metgrid.exe'
 metgrid_log = 'metgrid.exe.log'
 nmlstwps = 'namelist.wps'
-ncext = '.nc' # also used for geogrid files
-# dependent variables
+ncext = '.nc' # Also used for geogrid files.
 METGRID = './' + metgrid_exe
 
 # CMIP5 specific file names
@@ -60,199 +78,250 @@ grid_file_sftlf = 'sftlf_file.nc'
 weight_file = 'ocn2atmweight_file.nc'
 
 
-## determine which machine we are on
-#import socket # recognizing host
-#hostname = socket.gethostname()
+# =================================================================================
+# ================ Read environment variables (overrides defaults) ================
+# =================================================================================
 
-## RAM-disk on a local workstation:
-# use this command to mount: sudo mount -t ramfs -o size=100m ramfs $RAMDISK
-# followed by: sudo chown $USER $RAMDISK
-# and this to unmount:   sudo umount $RAMDISK
-# e.g.: sudo mount -t ramfs -o size=100m ramfs /media/tmp/ && sudo chown $USER /media/tmp/
+# NOTE: Default variable values are set above (some machine specific).
 
-## read environment variables (overrides defaults)
-# defaults are set above (some machine specific)
-# code root folder (instalation folder of 'WRF Tools'
+# Code root folder (instalation folder of 'WRF Tools')
 if 'CODE_ROOT' in os.environ: Model = os.environ['CODE_ROOT']
-else: raise ValueError('Environment variable $CODE_ROOT not defined')
-# NCARG installation folder (for NCL)
+else: raise ValueError('Environment variable $CODE_ROOT not defined.')
+
+# NCARG installation folder (for NCL) and NCL
 if 'NCARG_ROOT' in os.environ: 
   NCARG = os.environ['NCARG_ROOT']
-  if NCARG[-1] != '/': NCARG += '/' # local convention is that directories already have a slash
+  if NCARG[-1] != '/': NCARG += '/' 
+  # NOTE: Local convention is that directories already have a slash.
   NCL = NCARG + 'bin/ncl'
+
+# If RAMDISK should be defined in pyWPS
+if 'PYWPS_RAMDISK' in os.environ:
+  lram = bool(int(os.environ['PYWPS_RAMDISK'])) 
+  # NOTE: The bool command expects 0 or 1.
+else: lram = True
+
 # RAM disk
-if 'RAMDISK' in os.environ: Ram = os.environ['RAMDISK']
-# keep data in memory (for real.exe)
+if lram:
+  if 'RAMDISK' in os.environ: 
+    Ram = os.environ['RAMDISK']
+  else: 
+    raise ValueError('Error: Need to define RAMDISK.')
+else:
+  Ram = None
+
+# Keep data in memory (for real.exe)
 if 'PYWPS_KEEP_DATA' in os.environ:
-  ldata = bool(int(os.environ['PYWPS_KEEP_DATA'])) # expects 0 or 1
+  ldata = bool(int(os.environ['PYWPS_KEEP_DATA'])) 
+  # NOTE: The bool command expects 0 or 1.
 else: ldata = True
-# discover data based on available files
+
+# Discover data based on available files
 if 'PYWPS_DISCOVER' in os.environ:
-  ldiscover = bool(int(os.environ['PYWPS_DISCOVER'])) # expects 0 or 1
+  ldiscover = bool(int(os.environ['PYWPS_DISCOVER'])) 
+  # NOTE: The bool command expects 0 or 1.
 else: ldiscover = False
-# save metgrid data
+
+# Save metgrid data
 if 'PYWPS_MET_DATA' in os.environ and os.environ['PYWPS_MET_DATA']:
   Disk = os.environ['PYWPS_MET_DATA']
-  if Disk[-1] != '/': Disk += '/' # local convention is that directories already have a slash
+  if Disk[-1] != '/': Disk += '/' 
+  # NOTE: Local convention is that directories already have a slash.
   ldisk = True
 else: ldisk = False
-# number of processes NP 
+
+# Number of processes (NP) 
 if 'PYWPS_THREADS' in os.environ: NP = int(os.environ['PYWPS_THREADS'])
-# dataset specific stuff
+
+# Dataset specific stuff
 if 'PYWPS_DATA_TYPE' in os.environ: 
   dataset = os.environ['PYWPS_DATA_TYPE']
 else: 
-  raise ValueError('Unknown dataset type ($PYWPS_DATA_TYPE not defined)')
+  raise ValueError('   Unknown dataset type ($PYWPS_DATA_TYPE not defined).')
 
 
-## dataset manager parent class
+# ===============================================================================
+# === Dataset manager parent class: A class that encapsulates meta data and   ===
+# === operations specific to certain datasets. Note that this class does not  ===
+# === hold any actual data.                                                   ===
+# ===============================================================================
+
 class Dataset():
-  # a class that encapsulates meta data and operations specific to certain datasets
-  # note that this class does not hold any actual data 
-  prefix = '' # reanalysis generally doesn't have a prefix'
-  # ungrib
-  vtable = 'Vtable' # this is hard coded into ungrib 
-  gribname = 'GRIBFILE' # ungrib input filename trunk (needs extension, e.g. .AAA)
+ 
+  # Prefix variable
+  prefix = '' 
+  # NOTE: Reanalysis generally doesn't have a prefix.
+  
+  # Ungrib variables
+  vtable = 'Vtable' # This is hard coded into ungrib. 
+  gribname = 'GRIBFILE' # Ungrib input filename (needs extension, e.g. ".AAA").
   ungrib_exe = 'ungrib.exe'
   ungrib_log = 'ungrib.exe.log'
-  ungribout = 'FILE:{:04d}-{:02d}-{:02d}_{:02d}' # YYYY-MM-DD_HH ungrib.exe output format
-  # meta data defaults
-  grbdirs = None # list of source folders; same order as strings; has to be defined in child
-  grbstrs = None # list of source files; filename including date string; has to be defined in child
-  dateform = '\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHHMM (for matching regex)
-  datestr = '{:04d}{:02d}{:02d}{:02d}' # year, month, day, hour (for printing)
-  interval = 6 # data interval in hours (6-hourly data is most common)
+  ungribout = 'FILE:{:04d}-{:02d}-{:02d}_{:02d}' # ungrib.exe output format YYYY-MM-DD_HH.
   
-  ## these functions are dataset specific and may have to be implemented in the child class
+  # Meta data defaults
+  grbdirs = None # List of source folders; same order as strings; has to be defined in child.
+  grbstrs = None # List of source files; filenames including date string; has to be defined in child.
+  dateform = '\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHHMM (for matching in regex). 
+  # NOTE: There may be a difference between the dateform given and the comment
+  #   YYYYMMDDHHMM, but that does not mattern as this gets overwritten later.
+  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour (for printing).
+  interval = 6 # Data interval in hours (6-hourly data is most common).
+  
+  # ================================== __init__ function ==================================
+  # NOTE: This function is dataset specific and may have to be implemented in the child class.
   def __init__(self, folder=None):
-    # type checking
-    if not isinstance(self.grbdirs,(list,tuple)): raise TypeError('Need to define a list of grib folders.')
-    if not isinstance(self.grbstrs,(list,tuple)): raise TypeError('Need to define a list of grib file names.')
-    if len(self.grbstrs) != len(self.grbdirs): raise ValueError('Grid file types and folders need to be of the same number.')
-    if len(self.grbstrs) > len(Alphabet): raise ValueError('Currently only {0:d} file types are supported.'.format(len(Alphabet)))
-    # some general assignments
-    # N.B.: self.MainDir and self.mainrgx need to be assigned as well!
-    # files and folders
-    if not isinstance(folder,str): raise IOError('Warning: need to specify root folder!')
-    self.folder = folder # needs to be set externally for different applications
+    # Checking types, etc
+    if not isinstance(self.grbdirs,(list,tuple)): raise TypeError('   Need to define a list of grib folders.')
+    if not isinstance(self.grbstrs,(list,tuple)): raise TypeError('   Need to define a list of grib file names.')
+    if len(self.grbstrs) != len(self.grbdirs): raise ValueError('   Grid file types and folders need to be of the same number.')
+    if len(self.grbstrs) > len(Alphabet): raise ValueError('   Currently only {0:d} file types are supported.'.format(len(Alphabet)))
+    if not isinstance(folder,str): raise IOError('   Warning: Need to specify root folder!')    
+    # Files and folders    
+    self.folder = folder 
+    # NOTE: "folder" needs to be set externally for different applications.
     self.GrbDirs = ['{0:s}/{1:s}'.format(folder,grbdir) for grbdir in self.grbdirs]
-    self.UNGRIB = './' + self.ungrib_exe
-    # generate required ungrib names
+    # NOTE: "0:" in the above is the first input (folder) and "1:" is the second
+    #   input (grbdir). 
+    self.UNGRIB = './' + self.ungrib_exe    
+    # Generate required ungrib names
     gribnames = []
     for i in range(len(self.grbstrs)):
+      # NOTE: range(X) gives 0, 1, ..., X-1.
       gribname = '{0:s}.AA{1:s}'.format(self.gribname,Alphabet[i])
       gribnames.append(gribname)
-    self.gribnames = gribnames
-    # regex to extract dates from filenames
+    self.gribnames = gribnames    
+    # Regex to extract dates from filenames
     self.dateregx = re.compile(self.dateform)
-    # master file list (first element in grib file list)
-    self.MainDir = os.readlink(self.GrbDirs[0]) # directory to be searched for dates
-    self.mainfiles = self.grbstrs[0].format(self.dateform) # regex definition for master list
-    self.mainrgx = re.compile(self.mainfiles+'$') # use as master list    
+    # NOTE: re.compile(pattern) compiles a regular expression pattern into a regular 
+    #   expression object, which can be used for matching using its match(), search()
+    #   and other methods.    
+    # Master file list (first element in grib file list)
+    self.MainDir = os.readlink(self.GrbDirs[0]) # Directory to be searched for dates.
+    # NOTE: Python method readlink() returns a string representing the path to which 
+    #   the symbolic link points. It may return an absolute or relative pathname.
+    self.mainfiles = self.grbstrs[0].format(self.dateform) # Regex definition for master list.
+    # NOTE: I do not understand the format command above. ?????
+    self.mainrgx = re.compile(self.mainfiles+'$') # Use as master list. ?????    
+    
+  # NOTE: The functions below will be very similar for all datasets using ungrib.exe
+  #   (overload when not using ungrib.exe ?????).  
   
-  ## these functions will be very similar for all datasets using ungrib.exe (overload when not using ungrib.exe)
-  def setup(self, src, dst, lsymlink=False):
-    # method to copy dataset specific files and folders working directory
-    # executables
+  # ====================== Method to link/copy ungrib_exe and vtable ======================   
+  def setup(self, src, dst, lsymlink=False):    
+  # NOTE: lsymlink is to make clear if we're making links or, we're copying.
     if lsymlink:
       cwd = os.getcwd()
+      # NOTE: getcwd() returns current working directory of a process.
       os.chdir(dst)
-      # use current directory
+      # NOTE: chdir() changes the current working directory to the given 
+      #   path. It returns None in all the cases.
       os.symlink(src+self.ungrib_exe, self.ungrib_exe)
       os.symlink(Meta+self.vtable,self.vtable) # link VTable
       os.chdir(cwd)
     else:
       shutil.copy(src+self.ungrib_exe, dst)
       shutil.copy(Meta+self.vtable, dst)
+      # NOTE: shutil.copy(src, dst) copies the file src to the file or directory dst.   
   
+  # ======================= Method to remove ungrib_exe and vtable ========================  
   def cleanup(self, tgt):
-    # method to remove dataset specific files and links
     cwd = os.getcwd()
     os.chdir(tgt)
-    # use current directory
     os.remove(self.ungrib_exe)
     os.remove(self.vtable)
     os.chdir(cwd)
-  
+      
+  # ============= Method to generate date tuple from date string in filename ==============
   def extractDate(self, filename):
-    ''' method to generate date tuple from date string in filename '''
-    # match valid filenames
-    match = self.mainrgx.match(filename) # return match object
+    match = self.mainrgx.match(filename) # Match valid filename and return match object.
     if match is None:
-      return None # if the filename doesn't match the regex
-    else:
-      # extract date string
-      datestr = self.dateregx.search(filename).group()
-      # split date string into tuple
+      return None 
+    else:      
+      datestr = self.dateregx.search(filename).group() # Extract date string.
       year = int(datestr[0:4])
       month = int(datestr[4:6])
       day = int(datestr[6:8])
       hour = int(datestr[8:10])
-      return (year, month, day, hour)
-
+      return (year, month, day, hour)  
+  
+  # ============= Construct a list of dates where data should be available ==============
   def constructDateList(self, start, end):    
-    ''' construct a list of dates where data should be available '''
     import datetime as dt
-#     # Pandas implementation
-#     import pandas as pd
-#     dates = pd.date_range(dt.datetime(*start), 
-#                           dt.datetime(*end), 
-#                           freq='{:d}H'.format(dataset.interval)) # generate datelist
-#     # convert to the year-month-day-hour tuple
-#     dates = [(date.year, date.month, date.day, date.hour) for date in dates]
-    # datetime implementation
-    curd = dt.datetime(*start); endd = dt.datetime(*end) # datetime objects
-    delta = dt.timedelta(hours=self.interval) # usually an integer in hours...
-    dates = [] # create date list
+    curd = dt.datetime(*start); endd = dt.datetime(*end) # Datetime objects.
+    # NOTE: In a function call, * unpacks a list or tuple into position arguments,
+    #   whereas ** unpacks a dictionary into keyword arguments.
+    delta = dt.timedelta(hours=self.interval) # Usually an integer in hours.
+    dates = [] # Create date list.
     while curd <= endd:
-      dates.append((curd.year, curd.month, curd.day, curd.hour)) # format: year, month, days, hours
-      curd += delta # increment date by interval
-    # return properly formated list
-    return dates
+      dates.append((curd.year, curd.month, curd.day, curd.hour)) # Format: year, month, day, hour.
+      curd += delta # Increment date by interval.    
+    return dates # Return properly formated list.
 
-  def checkSubDir(self, *args):
-    # method to determine whether data is stored in subfolders and can be processed recursively
-    # most datasets will not have subfolders, we skip all subfolders by default    
+  # =========== Method to determine whether data is stored in subfolders and can  =========
+  # =========== be processed recursively. Most datasets will not have subfolders, =========
+  # =========== and so we skip all subfolders by default.                         =========
+  def checkSubDir(self, *args):   
     return False
-
+        
+  # ================= Method that generates the WRF IM file for metgrid.exe ===============
   def ungrib(self, date, mytag):
-    # method that generates the WRF IM file for metgrid.exe
-    # create formatted date string
-    datestr = self.datestr.format(*date) # (years, months, days, hours)
-    msg = datestr # status output; message printed later
-    # create links to relevant source data (requires full path for linked files)
-    Grbfiles = [] # list of relevant source files
+    # Create formatted date string
+    datestr = self.datestr.format(*date) # (years, months, days, hours).
+    # Initilize status output message (message printed later)
+    msg = datestr+", with files:"  
+    # Create links to relevant source data
+    Grbfiles = [] # List of relevant source files.
     for GrbDir,grbstr in zip(self.GrbDirs,self.grbstrs):
-      grbfile = grbstr.format(datestr) # insert current date
-      Grbfile = '{0:s}/{1:s}'.format(GrbDir,grbfile) # absolute path
+      # NOTE: The zip() function returns a zip object, which is an iterator of tuples 
+      #   where the first item in each passed iterator is paired together, and then 
+      #   the second item in each passed iterator are paired together, etc.
+      grbfile = grbstr.format(datestr) # Insert current date.
+      Grbfile = '{0:s}/{1:s}'.format(GrbDir,grbfile) # Absolute path.
       if not os.path.exists(Grbfile): 
         raise IOError("Input file '{0:s}' not found!".format(Grbfile))     
       else:
-        msg += '\n    '+grbfile # add to output
-        Grbfiles.append(Grbfile) # append to file list
-    # print feedback
-    print(('\n '+mytag+' Processing time-step:  '+msg))    
-    for Gribfile,gribname in zip(Grbfiles,self.gribnames): os.symlink(Gribfile,gribname) # link current file      
-    print(('\n  * '+mytag+' converting Grib to WRF IM format (ungrib.exe)'))
-    # N.B.: binary mode 'b' is not really necessary on Unix
-    # run ungrib.exe
-    fungrib = open(self.ungrib_log, 'a') # ungrib.exe output and error log
+        msg += '\n     '+grbfile # Add to output message.
+        Grbfiles.append(Grbfile) # Append to file list.
+    # Prompt on screen
+    print(('\n   '+mytag+' Processing time-step: '+msg))
+    # Link    
+    for Gribfile,gribname in zip(Grbfiles,self.gribnames): os.symlink(Gribfile,gribname)
+    # NOTE: The format for os.symlink is os.symlink(src, dst).       
+    # Prompt on screen
+    print('\n   * '+mytag+' Converting grib to WRF IM format (ungrib.exe).')    
+    # Run ungrib.exe
+    fungrib = open(self.ungrib_log, 'a') # ungrib.exe output and error log.
+    # NOTE: "a" above means append - opens a file for appending, creates 
+    #   the file if it does not exist. 
     subprocess.call([self.UNGRIB], stdout=fungrib, stderr=fungrib)
-    fungrib.close() # close log file for ungrib
-    for gribname in self.gribnames: os.remove(gribname) # remove link for next step    
-    # renaming happens outside, so we don't have to know about metgrid format
-    ungribout = self.ungribout.format(*date) # ungrib.exe names output files in a specific format
-    return ungribout # return name of output file
+    # NOTE: The subprocess module allows you to spawn new processes, connect to their 
+    #   input/output/error pipes, and obtain their return codes. With subprocess.call() 
+    #   you pass an array of commands and parameters. This expects input command and
+    #   its parameters inside [].
+    fungrib.close() # Close log file for ungrib.
+    # Remove links (to prepare for next step)
+    for gribname in self.gribnames: os.remove(gribname)    
+    # NOTE: os.remove() method is used to remove or delete a file path. This method can 
+    #   not remove or delete a directory. If the specified path is a directory then 
+    #   OSError will be raised by the method. os.rmdir() can be used to remove directories.    
+    # Make and return name of output file 
+    ungribout = self.ungribout.format(*date) 
+    # NOTE: ungrib.exe names output files in a specific format (hence the above).
+    return ungribout 
 
 
-## ERA-Interim
-class ERAI(Dataset):
-  # a class that holds meta data specific to ERA-Interim data
+# ===============================================================================
+# === ERA-Interim: A class that holds meta data specific to ERA-Interim data. ===
+# ===============================================================================
+ 
+class ERAI(Dataset):   
   grbdirs = ['uv','sc','sfc']
   grbstrs = ['ei.oper.an.pl.regn128uv.{:s}','ei.oper.an.pl.regn128sc.{:s}','ei.oper.an.sfc.regn128sc.{:s}']
-  dateform = '\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHH (for matching regex)
-  datestr = '{:04d}{:02d}{:02d}{:02d}' # year, month, day, hour (for printing)
-  # all other variables have default values
+  dateform = '\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHH (for matching regex).
+  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour (for printing).
+  # NOTE: All other variables have default values.
+
 
 ## NARR
 class NARR(Dataset):
@@ -707,131 +776,189 @@ class CMIP5(Dataset):
 #print('')
 
 
-## subroutines
+# =========================================================================================
+# =========================================================================================
+# =================================== Subroutines =========================================
+# =========================================================================================
+# =========================================================================================
 
-## function to divide a list fairly evenly 
+
+# ===============================================================================
+# =============== Function to divide a list fairly evenly.  =====================
+# ===============================================================================
+
 def divideList(genericlist, n):
-  nlist = len(genericlist) # total number of items
-  items = nlist // n # items per sub-list
+  
+  # Total number of items
+  nlist = len(genericlist) 
+  
+  # Items per sub-list
+  items = nlist // n 
+  # NOTE: "//" is floor division.
+  
+  # Remainder
   rem = nlist - items*n
-  # distribute list items
-  listoflists = []; ihi = 0 # initialize
+  
+  # Distribute list items
+  listoflists = []; ihi = 0 # Initialize.
   for i in range(n):
-    ilo = ihi; ihi += items # next interval
-    if i < rem: ihi += 1 # these intervals get one more
-    listoflists.append(genericlist[ilo:ihi]) # append interval to list of lists
-  # return list of sublists
-  return listoflists
+    ilo = ihi; ihi += items # Next interval.
+    if i < rem: ihi += 1 # These intervals get one more.
+    listoflists.append(genericlist[ilo:ihi]) # Append interval to list of lists.
+  # NOTE: This method gives us (rem)(items+1)+(n-rem)(items)  
+  #   = n*items+rem = nlist charachters, as expected.      
+    
+  return listoflists # Return list of sublists.
 
-## parallel pre-processing function
-# N.B.: this function has some shared variables for folder names and regx'
-# function to process filenames and check dates
+
+# ===============================================================================
+# === Parallel pre-processing function: This function processes filenames and ===
+# === checks dates. This function has some shared variables for folder names  ===
+# === and regx.                                                               ===
+# ===============================================================================
+ 
 def processFiles(qfilelist, qListDir, queue):
-#  # some old code with interesting regex handling
-#  files = [atmrgx.match(file) for file in filelist] # parse (partial) filelist for atmospheric model (CAM) output  
-#  atmfiles = [match.group() for match in files if not match is None] # list of time steps from atmospheric output
-#  files = [dateregx.search(atmfile) for atmfile in atmfiles]
-#  dates = [match.group() for match in files if not match is None]
-  # function to check filenames and subfolders recursively
+
+  # ======== Inside function to check filenames and subfolders recursively ========
   def checkFileList(filelist, ListDir, okdates, depth):
-    depth += 1 # counter for recursion depth
-    # N.B.: the recursion depth limit was introduced to prevent infinite recursions when circular links occur
-    # loop over dates
+    # Counter for recursion depth
+    depth += 1 
+    # NOTE: The recursion depth limit was introduced to prevent infinite recursions
+    #   when circular links occur.
+    # Loop over files
     for filename in filelist:
+      # Assemble full path+file
       TmpDir = ListDir + '/' + filename
+      # Check if TmpDir is a directory or file
       if os.path.isdir(TmpDir):
-        if dataset.checkSubDir(filename, starts[0], ends[0]):          
-          # make list of contents and process recursively
+        # Check if subfolders exist
+        if dataset.checkSubDir(filename, starts[0], ends[0]):
+        # NOTE: checkSubDir method is to determine whether data is stored 
+        #   in subfolders or not.          
+          # Make list of contents and process recursively
           if depth > 1: print(' (skipping subfolders beyond recursion depth/level 1)')
           else: okdates = checkFileList(os.listdir(TmpDir), TmpDir, okdates, depth)
+          # NOTE: os.listdir() method is used to get the list of all files and 
+          #   directories in the specified directory. 
       else:
-        # figure out time and date
+        # Figure out date and time
         date = dataset.extractDate(filename)
-        # collect valid dates
-        if date: # i.e. not 'None'
-          # check date for validity (only need to check first/master domain)      
+        # NOTE: extractDate method is to generate date tuple from date string in filename.
+        # Collect valid dates
+        if date: # i.e. not 'None'.
+          # Check date for validity (only need to check first/master domain) ?????     
           lok = nlt.checkDate(date, starts[0], ends[0])
-          # collect dates within range
+          # Collect dates within range
           if lok: okdates.append(date)
     return okdates
-  # start checking file list (start with empty results list)
-  qokdates = checkFileList(qfilelist, qListDir, [], 0)   
-  # return list of valid datestrs
+    
+  # Start checking file list (start with empty results list)
+  qokdates = checkFileList(qfilelist, qListDir, [], 0)
+     
+  # Return list of valid datestrs
   queue.put(qokdates)
   
 
-## primary parallel processing function: workload for each process
-# N.B.: this function has a lot of shared variable for folder and file names etc.
-# this is the actual processing pipeline
+# ===============================================================================
+# === Primary parallel processing function: workload for each process. This   ===
+# === function has a lot of shared variables for folder and file names etc.   ===
+# === This is the actual processing pipeline.                                 ===
+# ===============================================================================
+ 
 def processTimesteps(myid, dates):
   
-  # create process sub-folder
-  os.system('pwd')
+  # Create process sub-folder  
   mydir = pdir.format(myid)
+  # NOTE: An example for ".format" is txt = "For only {price:.2f} dollars!" and
+  #   print(txt.format(price = 49)). So in the above, mydir gets myid substituted 
+  #   into pdir.
+  
+  # Make MyDir (each processor's abs path)
   MyDir = Tmp + mydir
+  
+  # Make mytag from pname and myid
   mytag = '['+pname.format(myid)+']'
+  
+  # If mydir exists, remove it
   if os.path.exists(mydir): 
     shutil.rmtree(mydir)
+    # NOTE: shutil.rmtree(path) deletes an entire directory tree; path must point 
+    #   to a directory (but not a symbolic link to a directory).
+  
+  # Make mydir
   os.mkdir(mydir)
-  # copy namelist
+  
+  # Copy namelist
   shutil.copy(nmlstwps, mydir)
-  # change working directory to process sub-folder
+  
+  # Change working directory to process sub-folder
   os.chdir(mydir)
-  # link dataset specific files
+  
+  # Link dataset specific files
   dataset.setup(src=Tmp, dst=MyDir, lsymlink=True)
-  # link other source files
-  os.symlink(Meta, meta[:-1]) # link to folder
-  # link geogrid (data) and metgrid
-  os.symlink(Tmp+metgrid_exe, metgrid_exe)
-  for i in doms: # loop over all geogrid domains
+  # NOTE: setup(src, dst, lsymlink) is to link/copy ungrib_exe and vtable.
+  
+  # Link to Meta folder
+  os.symlink(Meta, meta[:-1])  
+  # NOTE: The syntax for os.symlink is os.symlink(src, dst).
+  # NOTE: This makes a symlink of tmp/meta in the process folder. 
+  
+  # Link geogrid (data) and metgrid_exe
+  for i in doms: # Loop over all geogrid domains.
     geoname = geopfx.format(i)+ncext
     os.symlink(Tmp+geoname, geoname)
+  os.symlink(Tmp+metgrid_exe, metgrid_exe)
   
-  ## loop over (atmospheric) time steps
-  if dates: print(('\n '+mytag+' Looping over Time-steps:'))
-  else: print(('\n '+mytag+' Nothing to do!'))
-  # loop over date-tuples
+  # Loop over date-tuples
   for date in dates:
     
-    # figure out sub-domains
-    ldoms = [True,]*maxdom # first domain is always computed
-    for i in range(1,maxdom): # check sub-domains
+    # Figure out sub-domains
+    ldoms = [True,]*maxdom # Initialize.    
+    for i in range(1,maxdom): # Check sub-domains.    
+    # NOTE: range(1,maxdom) gives 1,2,...,maxdom-1.
+    # NOTE: First domain is always computed.
       ldoms[i] = nlt.checkDate(date, starts[i], ends[i])
-    # update date string in namelist.wps
-    #print(imform,date)
+    
+    # imdate, imfile and nmldate
     imdate = imform.format(*date)    
     imfile = impfx+imdate
-    nmldate = nmlform.format(*date) # also used by metgrid
-    nlt.writeNamelist(nmlstwps, ldoms, nmldate, imd, isd, ied)
+    nmldate = nmlform.format(*date) # Also used by metgrid.
     
-    # N.B.: in case the stack size limit causes segmentation faults, here are some workarounds
+    # Update date string in namelist.wps
+    nlt.writeNamelist(nmlstwps, ldoms, nmldate, imd, isd, ied)
+    # NOTE: imd, isd and ied are defined outside this function.
+    
+    # Note: In case the stack size limit causes segmentation faults, here are some workarounds:
     # subprocess.call(r'ulimit -s unlimited; ./unccsm.exe', shell=True)
     # import resource
     # subprocess.call(['./unccsm.exe'], preexec_fn=resource.setrlimit(resource.RLIMIT_STACK,(-1,-1)))
     # print resource.getrlimit(resource.RLIMIT_STACK)
       
-    ## prepare WPS processing 
-    # run ungrib.exe or equivalent operation
-    preimfile = dataset.ungrib(date, mytag) # need 'mytag' for status messages
-    # rename intermediate file according to WPS convention (by date), if necessary
-    if preimfile: os.rename(preimfile, imfile) # not the same as 'move'
+    # Run ungrib.exe or equivalent operation
+    preimfile = dataset.ungrib(date, mytag) # We need 'mytag' for status messages.
+    # Rename intermediate file according to WPS convention (by date), if necessary
+    if preimfile: os.rename(preimfile, imfile) 
+    # NOTE: This is not the same as 'move'.
     
-    ## run WPS' metgrid.exe on intermediate file
-    # run metgrid_exe.exe
-    print(('\n  * '+mytag+' interpolating to WRF grid (metgrid.exe)'))
-    fmetgrid = open(metgrid_log, 'a') # metgrid.exe standard out and error log    
-    subprocess.call(['mpirun', '-n', '1', METGRID], stdout=fmetgrid, stderr=fmetgrid) # metgrid.exe writes a fairly detailed log file
-    # N.B.: for some reason, in this contect it is necessary to execute metgrid.exe with the MPI call
+    # Run metgrid_exe.exe
+    print('\n   * '+mytag+' Interpolating to WRF grid (metgrid.exe).') # Prompt on screen.
+    fmetgrid = open(metgrid_log, 'a') # Open (append) metgrid.exe standard out and error log.    
+    subprocess.call(['mpirun', '-n', '1', METGRID], stdout=fmetgrid, stderr=fmetgrid) 
+    # NOTE: metgrid.exe writes a fairly detailed log file.
+    # NOTE: For some reason, in this context it is necessary to execute metgrid.exe with the MPI call.
     fmetgrid.close()
     
-    ## finish time-step
-    os.remove(MyDir+imfile) # remove intermediate file after metgrid.exe completes
-    # copy/move data back to disk (one per domain) and/or keep in memory
-    tmpstr = '\n '+mytag+' Writing output to disk: ' # gather output for later display
+    # Remove intermediate file after metgrid.exe completes
+    os.remove(MyDir+imfile) 
+    
+    # Make display output variable for later display
+    tmpstr = '\n   * '+mytag+' Writing output to disk: ' 
+    
+    # Copy/move data back to disk (one per domain) and/or keep in memory    
     for i in range(maxdom):
       metfile = metpfx.format(i+1)+nmldate+ncext
       if ldoms[i]:
-        tmpstr += '\n                           '+metfile
+        tmpstr += '\n     '+metfile
         if ldisk: 
           shutil.copy(metfile,Disk+metfile)
         if ldata:
@@ -840,85 +967,104 @@ def processTimesteps(myid, dates):
           os.remove(metfile)
       else:
         if os.path.exists(metfile): 
-          os.remove(metfile) # metgrid.exe may create more files than needed
-    # finish time-step
-    tmpstr += '\n\n   ============================== finished '+imdate+' ==============================   \n'
+          os.remove(metfile) 
+    
+    # Prompt on screen
+    tmpstr += '\n\n   Finished '+imdate+'.'
     print(tmpstr)    
     
-      
-  ## clean up after all time-steps
-  # link other source files
-  os.remove(meta[:-1]) # link to folder
+  # Remove meta folder link
+  os.remove(meta[:-1]) 
+  
+  # Clean up the dataset 
   dataset.cleanup(tgt=MyDir)
+  # NOTE: This removes ungrib.exe and vtable from each process's directory.
+  
+  # Remove metgrid_exe
   os.remove(metgrid_exe)
-  for i in doms: # loop over all geogrid domains
+  
+  # Remove all the geogrid files/links
+  for i in doms: 
     os.remove(geopfx.format(i)+ncext)
     
+
+# ===============================================================================
+# ================================= Main program ================================
+# ===============================================================================
     
 if __name__ == '__main__':
       
-        
-    ##  prepare environment
-    # figure out root folder
-    Root = os.getcwd() + '/' # use current directory
-    # direct temporary storage
+    # ========================== Prepare environment ==========================
+    
+    # Figure out root folder
+    Root = os.getcwd() + '/' 
+    
+    # Direct temporary storage
     if Ram:       
-      Tmp = Ram + tmp # direct temporary storage to ram disk
-      if ldata: Data = Ram + data # temporary data storage (in memory)
-#      # provide link to ram disk directory for debugging      
-#      if not (os.path.isdir(ramlnk) or os.path.islink(ramlnk[:-1])):
-#        os.symlink(Ram, ramlnk)
+      Tmp = Ram + tmp # Direct temporary storage to ram disk.
+      if ldata: Data = Ram + data # Temporary data storage (in memory).
     else:      
-      Tmp = Root + tmp # use local directory
-      if ldata: Data = Root + data # temporary data storage (just moves here, no copy)      
-    # create temporary storage  (file system or ram disk alike)
+      Tmp = Root + tmp # Use local directory.
+      if ldata: Data = Root + data # Temporary data storage (just moves here, no copy).      
+    
+    # Create temporary storage (file system or ram disk alike)
     if os.path.isdir(Tmp):       
-      shutil.rmtree(Tmp) # clean out entire directory
-    os.mkdir(Tmp) # otherwise create folder 
-    # create temporary data collection folder
+      shutil.rmtree(Tmp) # Clean out entire directory, if it exists.
+    os.mkdir(Tmp) # Create folder. 
+    
+    # Create temporary data collection folder, if needed
     if ldata:
       if os.path.isdir(Data) or os.path.islink(Data[:-1]):
-        # remove directory if already there
-        shutil.rmtree(Data)
-      os.mkdir(Data) # create data folder in temporary storage
-    # create/clear destination folder
+        shutil.rmtree(Data) # Remove directory if already exists.
+      os.mkdir(Data) # Create data folder.
+    
+    # Create destination folder, if needed
     if ldisk:
       if not Disk: 
         Disk = Root + disk
       if not ( os.path.isdir(Disk) or os.path.islink(Disk[:-1]) ):
-        # create new destination folder
         os.mkdir(Disk)
-      ## remove directory if already there
-      #shutil.rmtree(Disk)
-      #os.mkdir(Disk)
-      
-    # directory shortcuts
+
+    # Make Meta
     Meta = Tmp + meta
-    # parse namelist parameters
+    
+    # Parse namelist parameters ?????
     imd, maxdom, isd, startdates, ied, enddates = nlt.readNamelist(nmlstwps)
-    # translate start/end dates into numerical tuples
+    
+    # Translate start/end dates into numerical tuples
     starts = [nlt.splitDateWRF(sd) for sd in startdates]
     ends = [nlt.splitDateWRF(ed) for ed in enddates]
-    # figure out domains
-    doms = list(range(1,maxdom+1)) # list of domain indices
+    
+    # List of domain indices
+    doms = list(range(1,maxdom+1)) 
+    # range(1,maxdom+1) gives 1,2,...,maxdom.
         
-    # copy meta data to temporary folder
+    # Copy meta data to temporary folder
     shutil.copytree(meta,Meta)
-    shutil.copy(metgrid_exe, Tmp)
-    shutil.copy(nmlstwps, Tmp)
-    for i in doms: # loop over all geogrid domains
+    # NOTE: shutil.copytree(src, dst) recursively copies an entire directory tree 
+    #   rooted at src to a directory named dst and return the destination directory. 
+    
+    # Copy metgrid_exe and nmlstwps into Tmp
+    shutil.copy(metgrid_exe,Tmp)
+    shutil.copy(nmlstwps,Tmp)
+    
+    # Copy all geogrid domains' files/links into Tmp
+    for i in doms: 
       shutil.copy(geopfx.format(i)+ncext, Tmp)
-    # copy additioal data required by CMIP5 dataset
+    
+    # Copy additional data required by CMIP5 dataset, if needed
     if dataset == 'CMIP5':
       shutil.copy(validate_file, Tmp)
       shutil.copy(grid_file_orog, Tmp)
       shutil.copy(grid_file_sftlf, Tmp)
       shutil.copy(weight_file, Tmp)
-    # N.B.: shutil.copy copies the actual file that is linked to, not just the link
-    # change working directory to tmp folder
-    os.chdir(Tmp)
+    # NOTE: If given a link, shutil.copy copies the actual file that 
+    #   is linked to, not just the link.
     
-    # create dataset instance
+    # Change working directory to tmp folder
+    os.chdir(Tmp)    
+    
+    # Create dataset instance
     if dataset  == 'CESM': 
       dataset = CESM(folder=Root)
       ldiscover = True # temporary, until the CESM part is implemented
@@ -932,55 +1078,92 @@ if __name__ == '__main__':
       dataset = NARR(folder=Root)    
     else:
       raise ValueError('Unknown dataset type: {}'.format(dataset))
-      #dataset = CESM(folder=Root) # for backwards compatibility
-    # setup working directory with dataset specific stuff
-    dataset.setup(src=Root, dst=Tmp) #
-    DataDir = dataset.MainDir # should be absolute path
+      
+    # dataset.setup 
+    dataset.setup(src=Root, dst=Tmp)
     
+    # dataset.MainDir 
+    DataDir = dataset.MainDir # Should be absolute path.
     
-    ## multiprocessing
+    # ========================== Multiprocessing ==========================     
     
-    # get date list
-    if ldiscover: 
-      # search for files and check dates for validity
+    # Get date list via ldiscover, if applicable
+    if ldiscover: # ldiscover = Discover data based on available files or not.
+    
+      # Divide DataDir contents amongst processes
       listoffilelists = divideList(os.listdir(DataDir), NP)
-      # divide file processing among processes
+      
+      # Divide file processing among processes
       procs = []; queues = []
       for n in range(NP):
-        pid = n + 1 # start from 1, not 0!
+        pid = n + 1 # n starts from 1, not 0.
         q = multiprocessing.Queue()
+        # NOTE: multiprocessing.Queue() returns a process shared queue implemented using 
+        #   a pipe and a few locks/semaphores (semaphore: A system of sending messages by  
+        #   holding the arms or two flags or poles in certain positions according to an 
+        #   alphabetic code). When a process first puts an item on the queue a feeder 
+        #   thread is started which transfers objects from a buffer into the pipe. The 
+        #   usual queue.Empty and queue.Full exceptions from the standard library’s 
+        #   queue module are raised to signal timeouts.
         queues.append(q)
         p = multiprocessing.Process(name=pname.format(pid), target=processFiles, args=(listoffilelists[n], DataDir, q))
+        # NOTE: multiprocessing.Process: Process objects represent activity that is run in a 
+        #   separate process. 
         procs.append(p)
         p.start() 
-      # terminate sub-processes and collect results    
-      dates = [] # new date list with valid dates only
+      
+      # Terminate sub-processes and collect results    
+      dates = [] # New date list with valid dates only.
       for n in range(NP):
         dates += queues[n].get()
+        # NOTE: The get above removes and returns an item from the queue. 
         procs[n].join()
-    else:
-      # construct date list based on dataset
-      dates = dataset.constructDateList(starts[0],ends[0])
-      
-    # report suspicious behaviour
-    if len(dates) == 0: raise IOError("No matching input files found for regex '{:s}' ".format(dataset.mainfiles))
-    #print dates
+        # NOTE: On Unix when a process finishes but has not been joined it becomes a zombie. 
+        #   There should never be very many because each time a new process starts, all completed 
+        #   processes which have not yet been joined will be joined. Even so, it is probably good 
+        #   practice to explicitly join all the processes that you start.
     
-    # divide up dates and process time-steps
+    # Get date list via dataset.constructDateList, if applicable
+    else:
+    
+      # Construct date list based on dataset
+      dates = dataset.constructDateList(starts[0],ends[0])
+    
+    # NOTE: In the above, we have ldiscover and if not used, we then use dataset.constructDateList.
+    #   So we use two methods that do the same thing. The reason that both of these are used, 
+    #   rather than just one is because of historical reasons.
+      
+    # Report suspicious behaviour
+    if len(dates) == 0: raise IOError("No matching input files found for regex '{:s}' ".format(dataset.mainfiles))
+        
+    # Divide up dates
     listofdates = divideList(dates, NP)
-    # create processes
+    
+    # Create and start processes
     procs = []
     for n in range(NP):
-      pid = n + 1 # start from 1, not 0!
+      pid = n + 1 # n starts from 1, not 0.
       p = multiprocessing.Process(name=pname.format(pid), target=processTimesteps, args=(pid, listofdates[n]))
       procs.append(p)
       p.start()     
-    # terminate sub-processes
+    
+    # Terminate processes
     for p in procs:
       p.join()
       
-    # clean up files
+    # Add an extra display line
+    print('')
+    
+    # Clean up files 
     os.chdir(Tmp)
     dataset.cleanup(tgt=Tmp)
+    # NOTE: This is to remove ungrib.exe and vtable.
     os.remove(metgrid_exe)
-    # N.B.: remember to remove *.nc files in meta-folder!
+    # NOTE: Remember to remove *.nc files in meta folder.
+    
+    
+    
+    
+    
+    
+    

@@ -1,34 +1,38 @@
 #!/bin/bash
-## Common job settings (environment variables)
+
+# Common job settings (environment variables).
 # The following environment variables have to be set by now:
 # JOBNAME, INIDIR, WRFSCRIPT, WPSSCRIPT
 # Optional: WAITFORWPS, NODES, TASKS, THREADS
 
 
-# directory setup
-export RUNNAME="${NEXTSTEP}" # step name, not job name!
-export WORKDIR="${INIDIR}/${RUNNAME}/" # step folder
-export WRFOUT="${INIDIR}/wrfout/" # output directory
-export RSTDIR="${WRFOUT}" # needed to link restart files
-export SCRIPTDIR="${INIDIR}/scripts/" # location of component scripts (pre/post processing etc.)
-export BINDIR="${INIDIR}/bin/" # location of executables (WRF and WPS)
-# N.B.: use absolute path for script and bin folders
-# archiving and averaging scripts
-export ARSCRIPT="" # archive script to be executed after WRF finishes
-export ARINTERVAL="" # default: every time
-export AVGSCRIPT="" # averaging script to be executed after WRF finishes
-export AVGINTERVAL="" # default: every time
-export STARTSCRIPT='startCycle.sh' # startCycle, by default
-# input data source (needed for treatment of leap years)
-export DATATYPE='' # type of initial and boundary forcing data
-# misc settings
-export WAITFORWPS='NO' # stay on compute node until WPS for next step finished, in order to submit next WRF job
-export AUTORST='RESTART' # perform auto restart after numerical instability
-export MAXRST=3 # number of restarts to be performed
-export DELT='30' # time decrement for auto restart
+# Directory setup
+export RUNNAME="${NEXTSTEP}" # Step name, not job name.
+export WORKDIR="${INIDIR}/${RUNNAME}/" # Step folder.
+export WRFOUT="${INIDIR}/wrfout/" # Output directory.
+export RSTDIR="${WRFOUT}" # Needed to link restart files.
+export SCRIPTDIR="${INIDIR}/scripts/" # Location of component scripts (pre/post processing etc.).
+export BINDIR="${INIDIR}/bin/" # Location of executables (WRF and WPS).
+# NOTE: Use absolute path for script and bin folders.
 
-## WRF settings
-# N.B.: these settings serve as fallback options when inferring from namelist fails
-export GHG='' # GHG emission scenario
-export RAD='' # radiation scheme
-export LSM='' # land surface scheme
+# Archiving and averaging scripts
+export ARSCRIPT="" # Archive script to be executed after WRF finishes.
+export ARINTERVAL="" # Default: every time.
+export AVGSCRIPT="" # Averaging script to be executed after WRF finishes.
+export AVGINTERVAL="" # Default: every time.
+export STARTSCRIPT='startCycle.sh' # startCycle, by default.
+
+# Input data source (needed for treatment of leap years) ?????
+export DATATYPE='' # Type of initial and boundary forcing data.
+
+# Misc settings
+export WAITFORWPS='NO' # Stay on compute node until WPS for next step is finished, in order to submit next WRF job.
+export AUTORST='RESTART' # Perform auto restart after numerical instability.
+export MAXRST=3 # Number of restarts to be performed.
+export DELT='30' # Time decrement for auto restart.
+
+# WRF settings
+export GHG='' # GHG emission scenario.
+export RAD='' # Radiation scheme.
+export LSM='' # Land surface scheme.
+# NOTE: These settings serve as fallback options when inferring from namelist fails (?????).
