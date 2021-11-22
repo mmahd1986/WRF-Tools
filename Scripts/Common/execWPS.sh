@@ -70,6 +70,8 @@ then
   # Handle a special case for WPS output data storage
   if [[ "${RAMIN}" == 0 ]] && [[ -z  "${METDATA}" ]] 
   then
+    echo
+    echo "   Using disk folder ${RAMDISK} as temporary work folder instead of RAM disk."
     RAMIN=1
     export RAMDISK="$WORKDIR/ram_disk/"
     RAMDATA="${RAMDISK}/data/" 
