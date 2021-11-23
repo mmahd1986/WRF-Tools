@@ -1000,7 +1000,7 @@ if __name__ == '__main__':
     Root = os.getcwd() + '/' 
     
     # Direct temporary storage
-    if Ram:       
+    if lram:       
       Tmp = Ram + tmp # Direct temporary storage to ram disk.
       if ldata: Data = Ram + data # Temporary data storage (in memory).
     else:      
