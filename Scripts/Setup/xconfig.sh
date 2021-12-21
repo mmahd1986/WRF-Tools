@@ -17,13 +17,13 @@ WRFTOOLS="${CODE_ROOT}/WRF-Tools"
 # ==================================================================================
 
 # Case Name
-NAME='NA-ERAI-Test'
+NAME='NA-ERAI'
 
 # GHG emission scenario
 GHG='RCP8.5' # CAMtr_volume_mixing_ratio.* file to be used.
 
 # Time period and cycling interval
-CYCLING="1979-01-01:1982-01-01:1M" 
+CYCLING="1979-01-01:1980-01-01:1M" 
 # NOTE: The date range is given as start:end:freq using the Pandas date_range format. 
 #   The last number is the frequency used for the step file, with 1D meaning 1 day,
 #   and 1M meaning 1 month.
@@ -31,6 +31,10 @@ CYCLING="1979-01-01:1982-01-01:1M"
 
 # I/O, archiving and averaging
 IO='fineIO' # This is used for namelist construction and archiving.
+# NOTE: For ERA5, we may want to output some vars more frequently in finIO; For this we
+#   use fineIOv9.highFreq (not fineIOv9) (we have to change the link of fineIO). This has
+#   auxhist1_interval = 180, auxhist2_interval = 180, auxhist4_interval = 180, and
+#   auxhist23_interval = 180, as opposed to the 360 minute values in fineIOv9.
 ARSYS='' 
 # NOTE: If we set ARSYS to '', archiving is not implimented. To do archiving we can  
 #   set this variable to HPSS.
@@ -101,21 +105,23 @@ DOM="na-era-i-${RES}" # Domain type.
 # WPS settings
 SHARE='arw' # Type of arw settings.
 GEOGRID="${DOM},${DOM}-grid" # Type of geogrid.
-# NOTE: SHARE,GEOGRID, and METGRID usually don't have to be set manually.
+METGRID='pywps' # Type of metgrid.
+# NOTE: SHARE, GEOGRID, and METGRID usually don't have to be set manually, but
+#   we set them here for the sake of clarification.
 
 # WRF settings
 TIME_CONTROL="cycling,${IO}" # Type of time control.
 DIAGS='hitop' # Type of diags.
-PHYSICS='conus' # Type of physics.
-NOAH_MP='conus' # Type for Noah_MP.
+PHYSICS='clim-CONUS-v43' # Type of physics.
+NOAH_MP='' # Type for Noah_MP.
 DOMAINS="${DOM},${DOM}-grid" # Type of domain.
 # NOTE: ${VAR,,} is called "Parameter Expansion" available in bash and it is
 #   to change the case of the string stored in the variable to lower case.
-FDDA='conus' # Type of FDDA.
-DYNAMICS='conus' # Type of dynamics.
-BDY_CONTROL='conus' # Type of boundary control.
+FDDA='' # Type of FDDA.
+DYNAMICS='cordex' # Type of dynamics.
+BDY_CONTROL='clim' # Type of boundary control.
 NAMELIST_QUILT='' # Type of namelist quilt.
- 
+
 
 # ==================================================================================
 # ======================== Namelist modifications by group =========================
@@ -126,6 +132,16 @@ NAMELIST_QUILT='' # Type of namelist quilt.
 #   We can separate multiple modifications by colons ':'. An example is:
 #   PHYSICS_MOD=' cu_physics = 3, 3, 3,: shcu_physics = 0, 0, 0,: sf_surface_physics = 4, 4, 4,'
 
+TIME_CONTROL_MOD=' interval_seconds = 21600,: auxinput4_interval = 360,: io_form_auxhist11 = 2,'
+# NOTE: The first two mods are for time_control.cycling snippet. The values in the 
+#   time_control.cycling snippet are the same as the ones above. However, we set these here 
+#   for reference, so that when we use ERA5, we may change them to half values.
+#   The last mod is for time_control.fineIO and is to turn the snow output on.
+
+DIAGS_MOD=' num_press_levels = 8: press_levels = 85000, 70000, 50000, 25000, 10000, 7000, 4000, 1500'
+# NOTE: This is to add extra vertical plev outputs near 10 hPa to be able to make comparison,  
+#   between high level (10 hPa) and lower level (50 hPa) model top run cases. 
+
 
 # ==================================================================================
 # ========== Custom environment section (will be inserted in run script) ===========
@@ -134,7 +150,7 @@ NAMELIST_QUILT='' # Type of namelist quilt.
 # --- begin custom environment ---
 export WRFENV='2019b' # WRF environment version (current options 2018a or 2019b).
 export WRFWAIT='1m' # Wait some time before launching WRF executable.
-export METDATA="${SCRATCH}/WRF4.3_Verification_Runs/WRFTools_RC3/metdata" # Disk metdata storage.
+export METDATA="${SCRATCH}/WRF4.3_Verification_Runs/WRFTools_RC7/metdata" # Disk metdata storage.
 # NOTE: If set, this stores metgrid data to disk (otherwise just within ram).
 export RAMIN=1 # To store data in ram data folder (or disk data folder); or not.
 export RAMOUT=1 # To write data to RAM and copy to HD later, or to write data directly to hard disk.
@@ -149,10 +165,11 @@ export RAMOUT=1 # To write data to RAM and copy to HD later, or to write data di
 # Root of WRF and WPS folders
 WRFROOT="$CODE_ROOT/WRF_AND_WPS/"
 
-# Some other timing settings that we can set 
-#WPSWCT='00:06:00' # WPS wall clock time.
-#WRFWCT='00:15:00' # WRF wall clock time.
-#WRFNODES=4 # Number of nodes to run WRF.         
+# WPS and WRF Wall Clock Times
+WPSWCT='04:00:00' # WPS wall clock time.
+WRFWCT='24:00:00' # WRF wall clock time.  
+
+# Some other timing settings that we can set        
 #DELT='45' # Amount of time (secs) to decrease in case of instability.
 
 # WPS executables
@@ -167,7 +184,10 @@ WRFSYS="Niagara" # WRF system.
 # NOTE: We can also set paths for geogrid.exe and wrf.exe explicitly using GEOEXE and WRFEXE.
 
 # Number of geogrid procceses
-GEOTASKS=10
+GEOTASKS=40
+
+# Number of nodes to run WRF
+WRFNODES=8 
 
 
 

@@ -1,7 +1,7 @@
 &geogrid
  geog_data_res = 'default',
- dx = 0.44,
- dy = 0.44,
+ dx = 0.11,
+ dy = 0.11,
  map_proj = 'lat-lon',
  ref_lat   =  48.0,
  ref_lon   = -100.2,
