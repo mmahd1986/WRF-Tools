@@ -592,8 +592,11 @@ if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]] || [[ "${DATAT
 elif [[ "${DATATYPE}" == 'CFSR' ]]; then
   ln -sf "${WPSSRC}/ungrib/Variable_Tables/${VTABLE_PLEV}" 'Vtable.CFSR_plev'
   ln -sf "${WPSSRC}/ungrib/Variable_Tables/${VTABLE_SRFC}" 'Vtable.CFSR_srfc'
-elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'ERA5' ]]; then
+elif [[ -n "${VTABLE}" ]]; then 
   ln -sf "${WPSSRC}/ungrib/Variable_Tables/${VTABLE}" 'Vtable'
+else 
+  echo "VTABLE variable is needed but not defined. Aborting." 
+  exit 1
 fi     
 
 # Link boundary data
