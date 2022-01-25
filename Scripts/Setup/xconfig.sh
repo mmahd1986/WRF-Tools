@@ -43,12 +43,15 @@ ARSCRIPT='DEFAULT'
 # NOTE: All CAPS keywords have special meanings, e.g., DEFAULT.
 # NOTE: Archiving is only implimented for fine IO (not default IO).
 # NOTE: If ARSYS is empty, then the ARSCRIPT variable is not important.
-ARINTERVAL='YEARLY' 
+ARINTERVAL='' 
 # NOTE: If archiving is done and ARINTERVAL='', the archiving is done after every step
 #   (not time step). This can also be YEARLY or MONTHLY as well. The YEARLY choice is
 #   usually the best choice. The only cases where monthly could be prefered are those 
 #   with 3 km or less resolution (for these a small job step, e.g., 3 days, is needed
-#   as well).       
+#   as well).
+# NOTE: If ARSYS is not set, but ARINTERVAL is set YEARLY, then archiving is tried at the
+#   end of the year and this results in errors (because the archving script is not present).
+#   To avoid this, set ARINTERVAL=''.        
 AVGSYS='Niagara' 
 # NOTE: If we set AVGSYS to '', averaging is not implimented. To do avergaing we can  
 #   set this variable to e.g., Niagara.
@@ -153,6 +156,7 @@ export METDATA="${SCRATCH}/WRF4.3_Verification_Runs/WRFTools_RC9/metdata" # Disk
 # NOTE: If set, this stores metgrid data to disk (otherwise just within ram).
 export RAMIN=1 # To store data in ram data folder (or disk data folder); or not.
 export RAMOUT=1 # To write data to RAM and copy to HD later, or to write data directly to hard disk.
+export REPLACE_IM_STLATSTLON='86.95000457763672,-199.20001220703125' # stlat_a and stlon_a for stlat and stlon correction.
 # ---  end custom environment  ---
 # NOTE: According to Andre, the above wait time probably has to do with file-system errors and 
 #   caching. You can reduce or remove the wait time entirely.
@@ -165,7 +169,7 @@ export RAMOUT=1 # To write data to RAM and copy to HD later, or to write data di
 WRFROOT="$CODE_ROOT/WRF_AND_WPS/"
 
 # WPS and WRF Wall Clock Times
-WPSWCT='04:00:00' # WPS wall clock time.
+WPSWCT='06:00:00' # WPS wall clock time.
 WRFWCT='24:00:00' # WRF wall clock time.  
 
 # Some other timing settings that we can set        
