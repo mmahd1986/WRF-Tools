@@ -126,6 +126,11 @@ then
   elif [[ "${DATATYPE}" == 'ERA-I' ]]; then
     cp ${NOCLOBBER} -P "${INIDIR}/uv" "${INIDIR}/sc" "${INIDIR}/sfc" "${WORKDIR}"
     cp ${NOCLOBBER} -P "${BINDIR}/ungrib.exe" "${WORKDIR}"
+  # Copy files/links for source data: ERA5 reanalysis data
+  elif [[ "${DATATYPE}" == 'ERA5' ]]; then
+    cp ${NOCLOBBER} -P "${INIDIR}/pl" "${INIDIR}/sl" "${WORKDIR}"
+    cp ${NOCLOBBER} -P "${BINDIR}/fixIM.py" "${WORKDIR}"
+    cp ${NOCLOBBER} -P "${BINDIR}/ungrib.exe" "${WORKDIR}"  
   fi # $DATATYPE
   
   # Copy meta folder, geo_em files & namelist.wps file (or their links) into ${WORKDIR}

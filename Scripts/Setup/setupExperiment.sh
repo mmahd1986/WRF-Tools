@@ -303,7 +303,7 @@ mkdir -p "${WRFOUT}"
 
 # WPS defaults 
 SHARE=${SHARE:-'arw'} # Share section of WPS namelist.
-METGRID=${METGRID:-'pywps'} # ?????
+METGRID=${METGRID:-'pywps'} # Metgrid section of WPS namelist.
 # NOTE: "${parameter:-word}" means that if parameter is unset or null, 
 #   the expansion of word is substituted. Otherwise, the value of  
 #   parameter is substituted.
@@ -328,6 +328,9 @@ elif [[ "${DATATYPE}" == 'CFSR' ]]; then
 elif [[ "${DATATYPE}" == 'ERA-I' ]]; then
   VTABLE=${VTABLE:-'Vtable.ERA-interim.pl'}
   METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.ERAI'}
+elif [[ "${DATATYPE}" == 'ERA5' ]]; then
+  VTABLE=${VTABLE:-'Vtable.ERA5.pl'}
+  METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.ERA5'}
 elif [[ "${DATATYPE}" == 'NARR' ]]; then
   VTABLE=${VTABLE:-'Vtable.NARR'}
   METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.ARW'}
@@ -349,7 +352,7 @@ if [[ -z "$WRFBLD" ]]; then
   if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]] || [[ "${DATATYPE}" == 'CMIP5' ]]; then
     WRFBLD="Clim-${IO}" # Variable GHG scenarios and no leap-years. ?????
     LLEAP='--noleap' # Option for Python script to omit leap days. 
-  elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'CFSR' ]] || [[ "${DATATYPE}" == 'NARR' ]]; then
+  elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'ERA5' ]] || [[ "${DATATYPE}" == 'CFSR' ]] || [[ "${DATATYPE}" == 'NARR' ]]; then
     WRFBLD="ReA-${IO}" # Variable GHG scenarios with leap-years. ?????
   else
     WRFBLD="Default-${IO}" # Standard WRF build with current I/O version. ?????
@@ -457,8 +460,8 @@ if [[ -e 'backup/xconfig.sh' && -e 'backup/setupExperiment.sh' ]]
   then # Presumably everything went OK, if these two are in the backup folder.
     eval $( rm -f *.sh *.pbs *.ll &> /dev/null ) # Delete scripts.
     eval $( rm -rf 'scripts' 'bin' 'meta' 'tables' &> /dev/null ) # Delete script and table folders.
-    eval $( rm -f 'atm' 'lnd' 'ice' 'plev' 'srfc' 'uv' 'sc' 'sfc' &> /dev/null ) # Delete input data folders. 
-    eval $( rm -f 'GPC' 'TCS' 'P7' 'i7' 'Bugaboo' 'Rocks' &> /dev/null ) # Delete machine markers. 
+    eval $( rm -f 'atm' 'lnd' 'ice' 'plev' 'srfc' 'uv' 'sc' 'sfc' 'pl' 'sl' &> /dev/null ) # Delete input data folders. 
+    eval $( rm -f 'GPC' 'TCS' 'P7' 'i7' 'Bugaboo' 'Rocks' 'Niagara' &> /dev/null ) # Delete machine markers. 
     # NOTE: We don't specify "-r" in the above for the folder deletion, as these are  
     #   simlinks and to delete folder simlinks you do not need "-r".
     # NOTE: We don't append '/', so that links to folders are removed.
@@ -589,7 +592,7 @@ if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]] || [[ "${DATAT
 elif [[ "${DATATYPE}" == 'CFSR' ]]; then
   ln -sf "${WPSSRC}/ungrib/Variable_Tables/${VTABLE_PLEV}" 'Vtable.CFSR_plev'
   ln -sf "${WPSSRC}/ungrib/Variable_Tables/${VTABLE_SRFC}" 'Vtable.CFSR_srfc'
-elif [[ "${DATATYPE}" == 'ERA-I' ]]; then
+elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'ERA5' ]]; then
   ln -sf "${WPSSRC}/ungrib/Variable_Tables/${VTABLE}" 'Vtable'
 fi     
 
@@ -614,6 +617,10 @@ elif [[ "${DATATYPE}" == 'ERA-I' ]]; then
   ln -sf "${DATADIR}/uv/" 'uv' # Pressure level date (3D, 0.7 deg).
   ln -sf "${DATADIR}/sc/" 'sc' # Pressure level date (3D, 0.7 deg).
   ln -sf "${DATADIR}/sfc/" 'sfc' # Surface data (2D, 0.7 deg).
+elif [[ "${DATATYPE}" == 'ERA5' ]]; then
+  rm -f 'pl' 'sl' 
+  ln -sf "${DATADIR}/pl/" 'pl' # Pressure level date (3D, 0.25 deg).
+  ln -sf "${DATADIR}/sl/" 'sl' # Surface data (2D, 0.25 deg).
 fi 
 
 
@@ -691,6 +698,9 @@ if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]]; then
 elif  [[ "${DATATYPE}" == 'CMIP5' ]]; then
   ln -sf "${WRFTOOLS}/NCL/unCMIP5.ncl"
   ln -sf "${WRFTOOLS}/bin/${WPSSYS}/unccsm.exe"
+elif  [[ "${DATATYPE}" == 'ERA5' ]]; then
+  ln -sf "${WRFTOOLS}/Python/wrfrun/fixIM.py"
+  ln -sf "${UNGRIBEXE}"
 else
   ln -sf "${UNGRIBEXE}"
 fi 

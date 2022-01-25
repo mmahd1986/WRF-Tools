@@ -9,7 +9,7 @@
 # ==================================================================================
 
 # WRF Tools directory
-WRFTOOLS="${CODE_ROOT}/WRF-Tools"
+WRFTOOLS="${CODE_ROOT}/WRF-Tools_ERA5dev"
 
 
 # ==================================================================================
@@ -17,7 +17,7 @@ WRFTOOLS="${CODE_ROOT}/WRF-Tools"
 # ==================================================================================
 
 # Case Name
-NAME='NA-ERAI'
+NAME='NA-ERA5'
 
 # GHG emission scenario
 GHG='RCP8.5' # CAMtr_volume_mixing_ratio.* file to be used.
@@ -79,8 +79,8 @@ RUNDIR="${PWD}" # Must not contain spaces.
 GEODATA='/project/p/peltier/WRF/geog_20210707/'
 
 # Meteorological data source definitions
-DATATYPE='ERA-I'
-DATADIR='/project/p/peltier/WRF/ERA-I'
+DATATYPE='ERA5'
+DATADIR='/project/p/peltier/WRF/ERA5-NA'
 
 
 # ==================================================================================
@@ -98,7 +98,7 @@ EMAIL='mani.mahdinia@utoronto.ca'
 MAXDOM=1 # Number of domains in WRF and WPS.
 RES='12km' # Domain resolution.
 # NOTE: The RES parameter does not need to be more accurate than necessary. 
-DOM="na-era-i-${RES}" # Domain type.
+DOM="na-era5-${RES}" # Domain type.
 # NOTE: The latter two options come in when selecting namelist snippets from   
 #   "WRF Tools/misc/namelists/geogrid" and "WRF Tools/misc/namelists/domains".
 
@@ -132,11 +132,10 @@ NAMELIST_QUILT='' # Type of namelist quilt.
 #   We can separate multiple modifications by colons ':'. An example is:
 #   PHYSICS_MOD=' cu_physics = 3, 3, 3,: shcu_physics = 0, 0, 0,: sf_surface_physics = 4, 4, 4,'
 
-TIME_CONTROL_MOD=' interval_seconds = 21600,: auxinput4_interval = 360,: io_form_auxhist11 = 2,'
-# NOTE: The first two mods are for time_control.cycling snippet. The values in the 
-#   time_control.cycling snippet are the same as the ones above. However, we set these here 
-#   for reference, so that when we use ERA5, we may change them to half values.
-#   The last mod is for time_control.fineIO and is to turn the snow output on.
+TIME_CONTROL_MOD=' interval_seconds = 10800,: auxinput4_interval = 180,: io_form_auxhist11 = 2,'
+# NOTE: The first two mods are for time_control.cycling snippet. We set these here 
+#   for ERA5 (half values of ERA-I). The last mod is for time_control.fineIO and is 
+#   to turn the snow output on.
 
 DIAGS_MOD=' num_press_levels = 8: press_levels = 85000, 70000, 50000, 25000, 10000, 7000, 4000, 1500'
 # NOTE: This is to add extra vertical plev outputs near 10 hPa to be able to make comparison,  
@@ -150,7 +149,7 @@ DIAGS_MOD=' num_press_levels = 8: press_levels = 85000, 70000, 50000, 25000, 100
 # --- begin custom environment ---
 export WRFENV='2019b' # WRF environment version (current options 2018a or 2019b).
 export WRFWAIT='1m' # Wait some time before launching WRF executable.
-export METDATA="${SCRATCH}/WRF4.3_Verification_Runs/WRFTools_RC7/metdata" # Disk metdata storage.
+export METDATA="${SCRATCH}/WRF4.3_Verification_Runs/WRFTools_RC9/metdata" # Disk metdata storage.
 # NOTE: If set, this stores metgrid data to disk (otherwise just within ram).
 export RAMIN=1 # To store data in ram data folder (or disk data folder); or not.
 export RAMOUT=1 # To write data to RAM and copy to HD later, or to write data directly to hard disk.
@@ -187,7 +186,7 @@ WRFSYS="Niagara" # WRF system.
 GEOTASKS=40
 
 # Number of nodes to run WRF
-WRFNODES=8 
+WRFNODES=16 
 
 
 

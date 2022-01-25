@@ -54,7 +54,9 @@ geopfx = 'geo_em.d{:02d}'
 # Parallelization
 pname = 'proc{:02d}'
 pdir = 'proc{:02d}/'
-# Do we alwyas use <100 processes? ?????
+# NOTE: For pyWPS we always use 1 node (so number of processes < 100). This is
+#   because the parallelization process was not able to do cross-node communications
+#   at the time that Andre developed the code.
 
 # Destination folder(s)
 ramlnk = 'ram' # Automatically generated link to ramdisk (if applicable).
@@ -164,8 +166,8 @@ class Dataset():
   grbstrs = None # List of source files; filenames including date string; has to be defined in child.
   dateform = '\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHHMM (for matching in regex). 
   # NOTE: There may be a difference between the dateform given and the comment
-  #   YYYYMMDDHHMM, but that does not mattern as this gets overwritten later.
-  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour (for printing).
+  #   YYYYMMDDHHMM, but that does not matter as this gets overwritten later.
+  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour.
   interval = 6 # Data interval in hours (6-hourly data is most common).
   
   # ================================== __init__ function ==================================
@@ -205,7 +207,7 @@ class Dataset():
     self.mainrgx = re.compile(self.mainfiles+'$') # Use as master list. ?????    
     
   # NOTE: The functions below will be very similar for all datasets using ungrib.exe
-  #   (overload when not using ungrib.exe ?????).  
+  #   (e.g., overload when not using ungrib.exe).  
   
   # ====================== Method to link/copy ungrib_exe and vtable ======================   
   def setup(self, src, dst, lsymlink=False):    
@@ -217,7 +219,7 @@ class Dataset():
       # NOTE: chdir() changes the current working directory to the given 
       #   path. It returns None in all the cases.
       os.symlink(src+self.ungrib_exe, self.ungrib_exe)
-      os.symlink(Meta+self.vtable,self.vtable) # link VTable
+      os.symlink(Meta+self.vtable,self.vtable) 
       os.chdir(cwd)
     else:
       shutil.copy(src+self.ungrib_exe, dst)
@@ -247,7 +249,6 @@ class Dataset():
   
   # ============= Construct a list of dates where data should be available ==============
   def constructDateList(self, start, end):    
-    import datetime as dt
     curd = dt.datetime(*start); endd = dt.datetime(*end) # Datetime objects.
     # NOTE: In a function call, * unpacks a list or tuple into position arguments,
     #   whereas ** unpacks a dictionary into keyword arguments.
@@ -319,9 +320,154 @@ class ERAI(Dataset):
   grbdirs = ['uv','sc','sfc']
   grbstrs = ['ei.oper.an.pl.regn128uv.{:s}','ei.oper.an.pl.regn128sc.{:s}','ei.oper.an.sfc.regn128sc.{:s}']
   dateform = '\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHH (for matching regex).
-  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour (for printing).
+  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour.
   # NOTE: All other variables have default values.
 
+
+# ===============================================================================
+# ========== ERA5: A class that holds meta data specific to ERA5 data. ==========
+# ===============================================================================
+ 
+class ERA5(Dataset):   
+  
+  # ERA5 data info
+  grbdirs = ['pl','sl']
+  grbstrs = ['ERA5-{:s}-pl.grib','ERA5-{:s}-sl.grib']
+  dateform = '\d\d\d\d\d\d\d\d\d\d\d\d' # YYYYMMDDHHmm (for matching regex).
+  datestr = '{:04d}{:02d}{:02d}{:02d}' # Year, month, day, hour.
+  yearlyfolders = True # Use subfolders for every year.
+  subdform = '\d\d\d\d' # Subdirectories in calendar year format. 
+  interval = 3 # ERA5 has 3-hourly data.
+  ungribdateout = '{:04d}-{:02d}-{:02d}_{:02d}' # ungrib.exe date output format YYYY-MM-DD_HH.
+  # NOTE: Variables, etc not mentioned here have the default values/definitions.
+  
+  # ERA5 temprorary files
+  preimfile = 'FILEOUT' 
+    
+  # fixIM file and its log
+  fixIM = 'fixIM.py'
+  fixIM_log = 'fixIM.py.log'
+  
+  # ================================== __init__ function ==================================
+  def __init__(self, folder=None):
+    # Checking types, etc
+    if not isinstance(self.grbdirs,(list,tuple)): raise TypeError('   Need to define a list of grib folders.')
+    if not isinstance(self.grbstrs,(list,tuple)): raise TypeError('   Need to define a list of grib file names.')
+    if len(self.grbstrs) != len(self.grbdirs): raise ValueError('   Grid file types and folders need to be of the same number.')
+    if len(self.grbstrs) > len(Alphabet): raise ValueError('   Currently only {0:d} file types are supported.'.format(len(Alphabet)))
+    if not isinstance(folder,str): raise IOError('   Warning: Need to specify root folder!')    
+    # Files and folders    
+    self.folder = folder 
+    # NOTE: "folder" needs to be set externally for different applications.
+    self.GrbDirs = ['{0:s}/{1:s}'.format(folder,grbdir) for grbdir in self.grbdirs]
+    # NOTE: "0:" in the above is the first input (folder) and "1:" is the second
+    #   input (grbdir). 
+    self.UNGRIB = './' + self.ungrib_exe   
+    self.FIXIM = ['python',self.fixIM] 
+    # Generate required ungrib names
+    gribnames = []
+    for i in range(len(self.grbstrs)):
+      # NOTE: range(X) gives 0, 1, ..., X-1.
+      gribname = '{0:s}.AA{1:s}'.format(self.gribname,Alphabet[i])
+      gribnames.append(gribname)
+    self.gribnames = gribnames    
+    # Display that there's yearly subfolder structure
+    if self.yearlyfolders: print('\n   Data appears to be stored in yearly subfolders.')
+    # Compile regular expressions (needed to extract dates) 
+    self.MainDir = os.readlink(self.GrbDirs[0]) # Directory to be searched for dates.
+    # NOTE: Python method readlink() returns a string representing the path to which 
+    #   the symbolic link points. It may return an absolute or relative pathname.
+    self.mainfiles = self.grbstrs[0].format(self.dateform) # Regex definition for master list.
+    self.mainrgx = re.compile(self.mainfiles+'$') # Use as master list.  
+    self.dateregx = re.compile(self.dateform) # Regex to extract dates from filenames.
+    self.subdregx = re.compile(self.subdform+'$') # Subfolder format (at the moment just calendar years). 
+    # NOTE: re.compile(pattern) compiles a regular expression pattern into a regular 
+    #   expression object, which can be used for matching using its match(), search()
+    #   and other methods.   
+  
+  # ====================== Method to link/copy ungrib_exe, fixIM and vtable ======================   
+  def setup(self, src, dst, lsymlink=False):    
+    if lsymlink:
+      cwd = os.getcwd()
+      os.chdir(dst)
+      os.symlink(src+self.ungrib_exe, self.ungrib_exe)
+      os.symlink(src+self.fixIM, self.fixIM)
+      os.symlink(Meta+self.vtable,self.vtable) 
+      os.chdir(cwd)
+    else:
+      shutil.copy(src+self.ungrib_exe, dst)
+      shutil.copy(src+self.fixIM, dst)
+      shutil.copy(Meta+self.vtable, dst)   
+  
+  # ======================= Method to remove ungrib_exe, fixIM and vtable ========================  
+  def cleanup(self, tgt):
+    cwd = os.getcwd()
+    os.chdir(tgt)
+    os.remove(self.ungrib_exe)
+    os.remove(self.fixIM)
+    os.remove(self.vtable)
+    os.chdir(cwd)
+
+  # ======= Method to determine whether a subfolder contains valid data and can be processed =======
+  # ======= recursively. Checks that the subfolder name is a valid calendar year.            =======
+  def checkSubDir(self, subdir, start, end):     
+    match = self.subdregx.match(subdir)
+    if match:      
+      lmatch = ( start[0] <= int(subdir) <= end[0] )
+    else: lmatch = False 
+    return lmatch 
+
+  # ================= Method that generates the WRF IM file for metgrid.exe ===============
+  def ungrib(self, date, mytag):  
+    # Create formatted date string
+    datestr = self.datestr.format(*date) # (years, months, days, hours).
+    # Initilize status output message (message printed later)
+    msg = datestr+", with files:"    
+    # Create links to relevant source data
+    Grbfiles = [] # List of relevant source files.    
+    for GrbDir,grbstr in zip(self.GrbDirs,self.grbstrs):
+      # NOTE: The zip() function returns a zip object, which is an iterator of tuples 
+      #   where the first item in each passed iterator is paired together, and then 
+      #   the second item in each passed iterator are paired together, etc.
+      grbfile = grbstr.format(datestr+'00') # Insert current date.
+      Grbfile = '{0:s}/{1:04d}/{2:s}'.format(GrbDir,date[0],grbfile) # Absolute path.
+      if not os.path.exists(Grbfile): 
+        raise IOError("Input file '{0:s}' not found!".format(Grbfile))     
+      else:
+        msg += '\n     '+grbfile # Add to output message.
+        Grbfiles.append(Grbfile) # Append to file list.
+    # Prompt on screen
+    print(('\n   '+mytag+' Processing time-step: '+msg))
+    # Link    
+    for Gribfile,gribname in zip(Grbfiles,self.gribnames): os.symlink(Gribfile,gribname)
+    # NOTE: The format for os.symlink is os.symlink(src, dst).       
+    # Prompt on screen
+    print('\n   * '+mytag+' Converting grib to WRF IM format (ungrib.exe).')    
+    # Run ungrib.exe
+    fungrib = open(self.ungrib_log, 'a') # ungrib.exe output and error log.
+    # NOTE: "a" above means append - opens a file for appending, creates 
+    #   the file if it does not exist. 
+    subprocess.call([self.UNGRIB], stdout=fungrib, stderr=fungrib)
+    # NOTE: The subprocess module allows you to spawn new processes, connect to their 
+    #   input/output/error pipes, and obtain their return codes. With subprocess.call() 
+    #   you pass an array of commands and parameters. This expects input command and
+    #   its parameters inside [].
+    fungrib.close() # Close log file for ungrib.    
+    # Prompt on screen
+    print('\n   * '+mytag+' Fixing WRF IM file (fixIM.py).')    
+    # Run fixIM.py
+    ffixim = open(self.fixIM_log, 'a') # fixIM.py output and error log.
+    call_arg = self.FIXIM   
+    call_arg = call_arg + [self.ungribdateout.format(*date)] + Grbfiles + [os.getcwd()+'/'+self.ungribout.format(*date)] 
+    subprocess.call(call_arg, stdout=ffixim, stderr=ffixim)
+    ffixim.close() # Close log file for fixIM.    
+    # Remove links (to prepare for next step)
+    for gribname in self.gribnames: os.remove(gribname)    
+    # NOTE: os.remove() method is used to remove or delete a file path. This method can 
+    #   not remove or delete a directory. If the specified path is a directory then 
+    #   OSError will be raised by the method. os.rmdir() can be used to remove directories.    
+    return self.preimfile
+    # NOTE: Renaming happens outside, so we don't have to know about metgrid format.      
 
 ## NARR
 class NARR(Dataset):
@@ -431,140 +577,152 @@ class CFSR(Dataset):
     # renaming happens outside, so we don't have to know about metgrid format
     return self.preimfile
   
-## CESM
+# ================================================================================
+# ===== CESM: A class that holds meta data and implements operations that're =====
+# ===== specific to CESM data. Note that this class does not hold any actual =====
+# ===== data unccsm executables. ?????                                       =====
+# ================================================================================
+
 class CESM(Dataset):
-  # a class that holds meta data and implements operations specific to CESM data
-  # note that this class does not hold any actual data
-  # unccsm executables
+  
+  # ncl, exe and log files
   unncl_ncl = 'unccsm.ncl'
   unncl_log = 'unccsm.ncl.log'
   unccsm_exe = 'unccsm.exe'
   unccsm_log = 'unccsm.exe.log'
+  
   # unccsm temporary files
-  nclfile = 'intermed.nc'
+  nclfile = 'intermed.nc' # Temporary file generated by NCL script.
   preimfile = 'FILEOUT' 
+  
   # CESM data source
-  prefix = '' # 'cesm19752000v2', 'cesmpdwrf1x1'
-  ncext = ncext
+  prefix = '' # 'cesm19752000v2', 'cesmpdwrf1x1' ?????
+  ncext = ncext # ?????
   dateform = '\d\d\d\d-\d\d-\d\d-\d\d\d\d\d'
-  datestr = '{:04d}-{:02d}-{:02d}-{:05d}' # year, month, day, seconds
-  yearlyfolders = False # use subfolders for every year
-  subdform = '\d\d\d\d' # subdirectories in calendar year format 
-  # atmosphere
+  datestr = '{:04d}-{:02d}-{:02d}-{:05d}' 
+  # NOTE: This is for year, month, day, seconds.
+  yearlyfolders = False # Use subfolders for every year.
+  subdform = '\d\d\d\d' # Subdirectories in calendar year format. 
+  
+  # Atmosphere, land and ice info
   atmdir = 'atm/'
   atmpfx = '.cam2.h1.'
   atmlnk = 'atmfile.nc'
-  # land
   lnddir = 'lnd/'
   lndpfx = '.clm2.h1.'
   lndlnk = 'lndfile.nc'
-  # ice
   icedir = 'ice/'
   icepfx = '.cice.h1_inst.'
   icelnk = 'icefile.nc'
 
+  # ================================== __init__ function ==================================
   def __init__(self, folder=None, prefix=None):
-    
+    # Checking if folder is specified correctly
     if not isinstance(folder,str): raise IOError('Warning: need to specify root folder!')    
-    ## CESM specific files and folders (only necessary for file operations)
-    self.folder = folder # needs to be set externally for different applications
+    # CESM specific files and folders (only necessary for file operations)
+    self.folder = folder # Needs to be set externally for different applications.
     self.AtmDir = os.readlink(folder + self.atmdir[:-1])
     self.LndDir = os.readlink(folder + self.lnddir[:-1])
     self.IceDir = os.readlink(folder + self.icedir[:-1])
+    # NOTE: Python method readlink() returns a string representing the path to which 
+    #   the symbolic link points. It may return an absolute or relative pathname.
+    # NCL_ETA2P and UNCCSM commands
     self.NCL_ETA2P = NCL + ' ' + self.unncl_ncl
     self.UNCCSM = './' + self.unccsm_exe
-    # set environment variable for NCL (on tmp folder)   
-    os.putenv('NCARG_ROOT', NCARG) 
-    os.putenv('NCL_POP_REMAP', meta) # NCL is finicky about space characters in the path statement, so relative path is saver
-    os.putenv('CODE_ROOT', Model) # also for NCL (where personal function libs are)
-      
-    # figure out source file prefix (only needs to be determined once)
+    # Set some environment variables   
+    os.putenv('NCARG_ROOT',NCARG) 
+    os.putenv('NCL_POP_REMAP',meta) 
+    # NOTE: NCL is finicky about space characters in the path statement, so we use relative path.
+    os.putenv('CODE_ROOT',Model) 
+    # NOTE: os.putenv(key,value) sets the environment variable named key to the string value. 
+    #   Such changes to the environment affect subprocesses started with os.system(), popen() or 
+    #   fork() and execv().
+    # Figure out source file prefix (only needs to be determined once)
     if not prefix: 
-      # get file prefix for data files
-      # use only atmosphere files
+      # Get file prefix for data files (use only atmospheric files)
       prergx = re.compile(self.atmpfx+self.dateform+self.ncext+'$')
-      # recursive function to search for first valid filename in subfolders
+      # Recursive function to search for first valid filename in subfolders
       def searchValidName(SearchFolder):
         prfx = None
         for filename in os.listdir(SearchFolder):
+          # NOTE: listdir() method in python is used to get the list of all files and directories 
+          #   in the specified directory. If we don't specify any directory, then list of files 
+          #   and directories in the current working directory will be returned.
           TmpDir = SearchFolder+'/'+filename
           if os.path.isdir(TmpDir):
-            prfx = searchValidName(TmpDir) # recursion
+            prfx = searchValidName(TmpDir) # Recursion.
             if prfx: self.yearlyfolders = True
           else:
             match = prergx.search(filename) 
-            if match: prfx = filename[0:match.start()] # use everything before the pattern as prefix
+            if match: prfx = filename[0:match.start()] # Use everything before the pattern as prefix.
           if prfx: break
         return prfx
-      # find valid file name in atmosphere directory
+      # Find valid file name in atmospheric directory
       prefix = searchValidName(self.AtmDir)
-      # print prefix
+      # Print prefix
       print(('\n No data prefix defined; inferring prefix from valid data files in directory '+self.AtmDir))
       print(('  prefix = '+prefix))
+    # Add prefix to variables as needed
     if prefix: self.atmpfx = prefix+self.atmpfx
     if prefix: self.lndpfx = prefix+self.lndpfx
     if prefix: self.icepfx = prefix+self.icepfx
     self.prefix = prefix
-    
-    # identify subfolder structure
+    # Display that there's yearly subfolder structure
     if self.yearlyfolders: print('\n Data appears to be stored in yearly subfolders.')
-
-    ## compile regular expressions (needed to extract dates)
-    # use atmosphere files as master list 
+    # Compile regular expressions (needed to extract dates) 
     self.MainDir = self.AtmDir
     self.mainfiles = self.atmpfx+self.dateform+self.ncext
-    self.mainrgx = re.compile(self.mainfiles+'$') # use atmosphere files as master list
-    # regex to extract dates from filenames
-    self.dateregx = re.compile(self.dateform)
-    # subfolder format (at the moment just calendar years)
-    self.subdregx = re.compile(self.subdform+'$')
+    self.mainrgx = re.compile(self.mainfiles+'$') # We use atmospheric files as master list.      
+    self.dateregx = re.compile(self.dateform) # Regex to extract dates from filenames.    
+    self.subdregx = re.compile(self.subdform+'$') # Subfolder format (at the moment just calendar years).
       
-  def checkSubDir(self, subdir, start, end):
-    # method to determine whether a subfolder contains valid data and can be processed recursively
-    # check that the subfolder name is a valid calendar year 
+  # ======= Method to determine whether a subfolder contains valid data and can be processed =======
+  # ======= recursively. Checks that the subfolder name is a valid calendar year.            =======
+  def checkSubDir(self, subdir, start, end):     
     match = self.subdregx.match(subdir)
     if match:      
-      # test that it is within the right time period
       lmatch = ( start[0] <= int(subdir) <= end[0] )
-    else: lmatch = False
-    # return results 
+    else: lmatch = False 
     return lmatch 
     
-  def extractDate(self, filename): # , zero=2000
-    # method to generate date tuple from date string in filename
-    # match valid filenames
-    match = self.mainrgx.match(filename) # return match object
+  # ============== Method to generate date tuple from date string in filename =================    
+  # NOTE: Here zero=2000.
+  def extractDate(self, filename): 
+    # Match valid filename
+    match = self.mainrgx.match(filename) 
     if match is None:
-      return None # if the filename doesn't match the regex
+      return None 
     else:
-      # extract date string
+      # Extract date string
       datestr = self.dateregx.search(filename).group()
-      # split date string into tuple 
+      # Split date string into tuple 
       year, month, day, second = datestr.split('-')
-#      if year[0] == '0': year = int(year)+zero # start at year 2000 (=0000)
       year = int(year)
-      month = int(month); day = int(day)
+      month = int(month) 
+      day = int(day)
       hour = int(second)//3600 
+      # NOTE: "//" is floor division.
       return (year, month, day, hour)
     
+  # ============= Construct a list of dates where data should be available ==============  
   def constructDateList(self, start, end):
-    curd = dt.datetime(*start); endd = dt.datetime(*end) # datetime objects
-    delta = dt.timedelta(hours=self.interval) # usually an integer in hours...
-    dates = [] # create date list
+    curd = dt.datetime(*start) 
+    endd = dt.datetime(*end) 
+    # NOTE: In a function call, * unpacks a list or tuple into position arguments,
+    #   whereas ** unpacks a dictionary into keyword arguments.
+    delta = dt.timedelta(hours=self.interval) # Usually an integer in hours.
+    dates = [] 
     while curd <= endd:
-        if not (curd.month == 2 and curd.day == 29):
-            dates.append((curd.year, curd.month, curd.day, curd.hour))
-        curd += delta # increment date by interval
-    # return properly formated list
+      if not (curd.month == 2 and curd.day == 29):
+        dates.append((curd.year, curd.month, curd.day, curd.hour))
+      curd += delta 
     return dates
   
+  # =================== Method to copy/link unccsm_exe and unncl_ncl ===================  
   def setup(self, src, dst, lsymlink=False):          
-    # method to copy dataset specific files and folders working directory
-    # executables   
     if lsymlink:
       cwd = os.getcwd()
       os.chdir(dst)
-      # use current directory
       os.symlink(src+self.unccsm_exe, self.unccsm_exe)
       os.symlink(src+self.unncl_ncl, self.unncl_ncl)
       os.chdir(cwd)
@@ -572,20 +730,20 @@ class CESM(Dataset):
       shutil.copy(src+self.unccsm_exe, dst)
       shutil.copy(src+self.unncl_ncl, dst)
 
+  # =================== Method to remove unccsm_exe and unncl_ncl ===================
   def cleanup(self, tgt):
-    # method to remove dataset specific files and links
     cwd = os.getcwd()
-    os.chdir(tgt)
-    # use current directory    
+    os.chdir(tgt)   
     os.remove(self.unccsm_exe)
     os.remove(self.unncl_ncl)
     os.chdir(cwd)
 
-  def ungrib(self, date, mytag):
-    # method that generates the WRF IM file for metgrid.exe
-    # create formatted date string
-    datestr = self.datestr.format(date[0],date[1],date[2],date[3]*3600) # not hours, but seconds...
-    # create links to relevant source data (requires full path for linked files)
+  # =================== Method that generates the WRF IM file for metgrid.exe ===================   
+  def ungrib(self, date, mytag): 
+    # Create formatted date string 
+    datestr = self.datestr.format(date[0],date[1],date[2],date[3]*3600) 
+    # NOTE: This is not in hours, but seconds.
+    # Create links to relevant source data (requires full path for linked files)
     atmfile = self.atmpfx+datestr+self.ncext
     if self.yearlyfolders: atmfile = '{:04d}/{:s}'.format(date[0],atmfile) 
     if not os.path.exists(self.AtmDir+atmfile): 
@@ -601,29 +759,28 @@ class CESM(Dataset):
     if not os.path.exists(self.IceDir+icefile): 
       raise IOError("Seaice input file '{:s}' not found!".format(self.IceDir+icefile))
     os.symlink(self.IceDir+icefile,self.icelnk)
-    # print feedback
+    # Print feedback
     print(('\n '+mytag+' Processing time-step:  '+datestr+'\n    '+atmfile+'\n    '+lndfile+'\n    '+icefile))
-    #else: print('\n '+mytag+' Processing time-step:  '+datestr+'\n    '+atmfile+'\n    '+lndfile)
-    
-    ##  convert data to intermediate files (run unccsm tool chain)
-    # run NCL script (suppressing output)
-    print(('\n  * '+mytag+' interpolating to pressure levels (eta2p.ncl)'))
-    fncl = open(self.unncl_log, 'a') # NCL output and error log
-    # on SciNet we have to pass this command through the shell, so that the NCL module is loaded.
+    # Convert data to intermediate files (run unccsm tool chain): Run NCL script 
+    print(('\n  * '+mytag+' Interpolating to pressure levels (eta2p.ncl)'))
+    fncl = open(self.unncl_log,'a') # NCL output and error log.
+    # NOTE: "a" above means append - opens a file for appending, creates 
+    #   the file if it does not exist.    
     subprocess.call(self.NCL_ETA2P, shell=True, stdout=fncl, stderr=fncl)
-    ## otherwise we don't need the shell and it's a security risk
-    #subprocess.call([NCL,self.unncl_ncl], stdout=fncl, stderr=fncl)
+    # NOTE: On SciNet we have to pass this command through the shell (so the NCL module is loaded).
+    #   Otherwise we don't need the shell, because it's a security risk (Andre: Using shell=True is 
+    #   considered a security risk, probably because it can be exploited for arbitrary code execution).
     fncl.close()
-    # run unccsm.exe
-    print(('\n  * '+mytag+' writing to WRF IM format (unccsm.exe)'))
-    funccsm = open(self.unccsm_log, 'a') # unccsm.exe output and error log
+    # Convert data to intermediate files (run unccsm tool chain): Run unccsm.exe
+    print(('\n  * '+mytag+' Writing to WRF IM format (unccsm.exe)'))
+    funccsm = open(self.unccsm_log, 'a') # unccsm.exe output and error log.
     subprocess.call([self.UNCCSM], stdout=funccsm, stderr=funccsm)   
     funccsm.close()
-    # cleanup
-    os.remove(self.atmlnk); os.remove(self.lndlnk); os.remove(self.icelnk)
-    os.remove(self.nclfile)    # temporary file generated by NCL script 
-    # renaming happens outside, so we don't have to know about metgrid format
+    # Cleanup extra files
+    os.remove(self.atmlnk); os.remove(self.lndlnk)
+    os.remove(self.icelnk); os.remove(self.nclfile)     
     return self.preimfile
+    # NOTE: Renaming happens outside, so we don't have to know about metgrid format.
 
 #====================================================================================
 ## CMIP5
@@ -846,7 +1003,7 @@ def processFiles(qfilelist, qListDir, queue):
         # NOTE: extractDate method is to generate date tuple from date string in filename.
         # Collect valid dates
         if date: # i.e. not 'None'.
-          # Check date for validity (only need to check first/master domain) ?????     
+          # Check date for validity (only need to check first/master domain)      
           lok = nlt.checkDate(date, starts[0], ends[0])
           # Collect dates within range
           if lok: okdates.append(date)
@@ -940,7 +1097,7 @@ def processTimesteps(myid, dates):
     if preimfile: os.rename(preimfile, imfile) 
     # NOTE: This is not the same as 'move'.
     
-    # Run metgrid_exe.exe
+    # Run metgrid_exe
     print('\n   * '+mytag+' Interpolating to WRF grid (metgrid.exe).') # Prompt on screen.
     fmetgrid = open(metgrid_log, 'a') # Open (append) metgrid.exe standard out and error log.    
     subprocess.call(['mpirun', '-n', '1', METGRID], stdout=fmetgrid, stderr=fmetgrid) 
@@ -1074,6 +1231,8 @@ if __name__ == '__main__':
       dataset = CFSR(folder=Root)
     elif dataset  == 'ERA-I': 
       dataset = ERAI(folder=Root)    
+    elif dataset  == 'ERA5': 
+      dataset = ERA5(folder=Root) 
     elif dataset  == 'NARR': 
       dataset = NARR(folder=Root)    
     else:
