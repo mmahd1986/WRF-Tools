@@ -9,7 +9,7 @@
 # ==================================================================================
 
 # WRF Tools directory
-WRFTOOLS="${CODE_ROOT}/WRF-Tools_ERA5dev"
+WRFTOOLS="${CODE_ROOT}/WRF-Tools"
 
 
 # ==================================================================================
@@ -17,13 +17,13 @@ WRFTOOLS="${CODE_ROOT}/WRF-Tools_ERA5dev"
 # ==================================================================================
 
 # Case Name
-NAME='NA-ERA5'
+NAME='NA-ERA5-GL25_debug'
 
 # GHG emission scenario
 GHG='RCP8.5' # CAMtr_volume_mixing_ratio.* file to be used.
 
 # Time period and cycling interval
-CYCLING="1979-01-01:1980-01-01:1M" 
+CYCLING="2015-09-01:2018-01-01:1M" 
 # NOTE: The date range is given as start:end:freq using the Pandas date_range format. 
 #   The last number is the frequency used for the step file, with 1D meaning 1 day,
 #   and 1M meaning 1 month.
@@ -35,7 +35,7 @@ IO='fineIO' # This is used for namelist construction and archiving.
 #   use fineIOv9.highFreq (not fineIOv9) (we have to change the link of fineIO). This has
 #   auxhist1_interval = 180, auxhist2_interval = 180, auxhist4_interval = 180, and
 #   auxhist23_interval = 180, as opposed to the 360 minute values in fineIOv9.
-ARSYS='' 
+ARSYS='HPSS' 
 # NOTE: If we set ARSYS to '', archiving is not implimented. To do archiving we can  
 #   set this variable to HPSS.
 ARSCRIPT='DEFAULT' 
@@ -43,7 +43,7 @@ ARSCRIPT='DEFAULT'
 # NOTE: All CAPS keywords have special meanings, e.g., DEFAULT.
 # NOTE: Archiving is only implimented for fine IO (not default IO).
 # NOTE: If ARSYS is empty, then the ARSCRIPT variable is not important.
-ARINTERVAL='' 
+ARINTERVAL='YEARLY' 
 # NOTE: If archiving is done and ARINTERVAL='', the archiving is done after every step
 #   (not time step). This can also be YEARLY or MONTHLY as well. The YEARLY choice is
 #   usually the best choice. The only cases where monthly could be prefered are those 
@@ -113,7 +113,7 @@ METGRID='pywps' # Type of metgrid.
 #   we set them here for the sake of clarification.
 
 # WRF settings
-TIME_CONTROL="cycling,${IO}" # Type of time control.
+TIME_CONTROL="cycling,${IO}v9.highFreq.lowFreq_dd_and_moist" # Type of time control.
 DIAGS='hitop' # Type of diags.
 PHYSICS='clim-CONUS-v43' # Type of physics.
 NOAH_MP='' # Type for Noah_MP.
@@ -135,7 +135,7 @@ NAMELIST_QUILT='' # Type of namelist quilt.
 #   We can separate multiple modifications by colons ':'. An example is:
 #   PHYSICS_MOD=' cu_physics = 3, 3, 3,: shcu_physics = 0, 0, 0,: sf_surface_physics = 4, 4, 4,'
 
-TIME_CONTROL_MOD=' interval_seconds = 10800,: auxinput4_interval = 180,: io_form_auxhist11 = 2,'
+TIME_CONTROL_MOD=' interval_seconds = 10800,: auxinput4_interval = 180,: io_form_auxhist11 = 2,: diag_print = 2,: debug_level = 300,'
 # NOTE: The first two mods are for time_control.cycling snippet. We set these here 
 #   for ERA5 (half values of ERA-I). The last mod is for time_control.fineIO and is 
 #   to turn the snow output on.
@@ -143,6 +143,10 @@ TIME_CONTROL_MOD=' interval_seconds = 10800,: auxinput4_interval = 180,: io_form
 DIAGS_MOD=' num_press_levels = 8: press_levels = 85000, 70000, 50000, 25000, 10000, 7000, 4000, 1500'
 # NOTE: This is to add extra vertical plev outputs near 10 hPa to be able to make comparison,  
 #   between high level (10 hPa) and lower level (50 hPa) model top run cases. 
+
+# Modifications for lake stability
+# DYNAMICS_MOD=' epssm = 0.78: time_step_sound = 6'
+# DOMAINS_MOD=' time_step = 30' 
 
 
 # ==================================================================================
@@ -152,7 +156,7 @@ DIAGS_MOD=' num_press_levels = 8: press_levels = 85000, 70000, 50000, 25000, 100
 # --- begin custom environment ---
 export WRFENV='2019b' # WRF environment version (current options 2018a or 2019b).
 export WRFWAIT='1m' # Wait some time before launching WRF executable.
-export METDATA="${SCRATCH}/WRF4.3_Verification_Runs/WRFTools_RC9/metdata" # Disk metdata storage.
+export METDATA="${SCRATCH}/ERAI_AND_ERA5_RUN_CASES/WRFTools_RC12c_debug/metdata" # Disk metdata storage.
 # NOTE: If set, this stores metgrid data to disk (otherwise just within ram).
 export RAMIN=1 # To store data in ram data folder (or disk data folder); or not.
 export RAMOUT=1 # To write data to RAM and copy to HD later, or to write data directly to hard disk.
@@ -178,13 +182,15 @@ WRFWCT='24:00:00' # WRF wall clock time.
 # WPS executables
 WPSSYS="Niagara" # WPS system. 
 # NOTE: WPSSYS also affects unccsm.exe.
-# NOTE: We can also specify WPSBLD, e.g., WPSBLD='Clim-fineIO'.
-# NOTE: We can set paths for metgrid.exe and real.exe explicitly using METEXE and REALEXE.
+WPSBLD="ReA-fineIO"
+# NOTE: WPSBLD is used to find the WPS executables.
+# NOTE: We can also set paths for geogrid.exe, ungrib.exe and metgrid.exe explicitly using GEOEXE, UNGRIBEXE and METEXE.
 
 # WRF executables
 WRFSYS="Niagara" # WRF system.
-# NOTE: We can also specify WRFBLD, e.g., WRFBLD='Clim-fineIO'.
-# NOTE: We can also set paths for geogrid.exe and wrf.exe explicitly using GEOEXE and WRFEXE.
+WRFBLD="ReA-fineIO-GLERL25"
+# NOTE: WRFBLD is used to find the WRF executables.
+# NOTE: We can also set paths for real.exe and wrf.exe explicitly using REALEXE and WRFEXE.
 
 # Number of geogrid procceses
 GEOTASKS=40

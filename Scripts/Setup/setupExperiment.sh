@@ -401,7 +401,7 @@ WRFNODES=${WRFNODES:-$TMP}
 GEOEXE=${GEOEXE:-"${WPSSRC}/${WPSSYS}-MPI/${WPSBLD}/Default/geogrid.exe"} 
 UNGRIBEXE=${UNGRIBEXE:-"${WPSSRC}/${WPSSYS}-MPI/${WPSBLD}/Default/ungrib.exe"}
 METEXE=${METEXE:-"${WPSSRC}/${WPSSYS}-MPI/${WPSBLD}/Default/metgrid.exe"}
-REALEXE=${REALEXE:-"${WRFSRC}/${WPSSYS}-MPI/${WPSBLD}/Default/real.exe"} # Shouldn't these be WRFSYS and WRFBLD? ?????
+REALEXE=${REALEXE:-"${WRFSRC}/${WPSSYS}-MPI/${WRFBLD}/Default/real.exe"} # Shouldn't these be WRFSYS and WRFBLD? ?????
 WRFEXE=${WRFEXE:-"${WRFSRC}/${WRFSYS}-MPI/${WRFBLD}/Default/wrf.exe"}
 # NOTE: The folder 'Default' can be a symlink to the default directory for executables.
 

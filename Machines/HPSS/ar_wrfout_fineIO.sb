@@ -1,632 +1,1228 @@
 #!/bin/bash
-## queue/SLURM settings
+
+# ============== Queue/SLURM settings =============
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=40
-# 72h is maximum for long queue, 1h for short
-#SBATCH --time=72:00:00
-# archive queue (long or short)
 #SBATCH -p archivelong
-# std and error output (job_name.job_id.out)
+#SBATCH --time=72:00:00
 #SBATCH --output=%x.%j.out
-# send email if abort (nbae)
 #SBATCH --mail-user="$EMAIL"
 #SBATCH --mail-type=END,FAIL
-# job name
 #SBATCH -J cycling_ar
 
+# NOTE: Archive queue is archivelong or archiveshort.
+# NOTE: 72h is the maximum for long queue, 1h for the short one.
+# NOTE: In the above %x is job_name and %j is job_id.
 
-#set -o pipefail # through error (in exit code) if pipe fails
+
+# Trap script termination or interruption
 trap "echo 'Job script not completed';exit 129" TERM INT
+# NOTE: "trab A B" does A upon occurance of signal(s) B.
+# NOTE: The SIGINT signal is sent to a process by its controlling terminal when a user wishes 
+#   to interrupt the process. This is typically initiated by pressing Ctrl+C, but on some systems, 
+#   the "delete" character or "break" key can be used.
+# NOTE: The SIGTERM signal is sent to a process to request its termination. Unlike the SIGKILL 
+#   signal, it can be caught and interpreted or ignored by the process. This allows the process 
+#   to perform nice termination releasing resources and saving state if appropriate. SIGINT is 
+#   nearly identical to SIGTERM.
 
-# if the $ARCHIVE environment variable does not exist anymore, we create it,
-ARCHIVE=${ARCHIVE:-"${HOME/home/archive}"} # because we need it later
 
-## definitions
-# set $TAGS to determine, which file sets to archive
-# operation to perform: LIST, VERIFY, REMOVE, BACKUP, RETRIEVE
+# If $ARCHIVE environment var does not exist anymore, we create it, because we need it later
+ARCHIVE=${ARCHIVE:-"${HOME/home/archive}"} 
+# NOTE: In the above, ${parameter/pattern/string} is to replace the first occurrence of pattern 
+#   with string.
+# NOTE: The above path (e.g., /archive/p/peltier/mahdinia) is only visible in hsi or htar.
+
+
+# ======================================== Definitions ========================================
+
+# NOTE: We can set $TAGS to determine, which file sets to archive.
 MODE=${MODE:-'BACKUP'} # default operation: 'BACKUP'
-RMSRC=${RMSRC:-'FALSE'} # set to 'RMSRC' to actually perform deletion
-# N.B. if retrieving files, RMSRC means files on disk are overwritten/clobbered
-VERIFY=${VERIFY:-'VERIFY'} # verify tarballs; can slow down operations significantly
-# N.B.: do not edit these variable; instead pass them as environment variables
-DOMAINS=${DOMAINS:-'1234'} # string with relevant domain indices
-DATASET=${DATASET:-'FULL'} # default dataset: everything
-# dataset options: FULL, DIAGS, MISC3D, DYN3D, LOGS, FINAL, DEL3D, HYDRO, MISCDIAG
-# N.B.: the datasets are defined in PROCESSDATASET below
-ARINTERVAL='YEARLY' # default, which is updated by setupExperiment
-INTERVAL=${INTERVAL:-"${ARINTERVAL}"} # default is set by ARINTERVAL 
-PATTERN=${PATTERN:-'_wrf.tgz'} # $TAGS inference from certain files
-PATREGX=${PATREGX:-''} # matching regex for $TAGS: roughly TAGS=$(ls *$PATTERN | grep -o $PATREGX)
-TAGGLOB=${TAGGLOB:-''} # globbing extension for $TAGS (TAGSTR="${TAG}${TAGGLOB}")
-MarcRst=${MarcRst:-'FALSE'} # inidcate if wrfrst files are in marcIO archives instead of misc3d
-# data folder
-INIDIR=${INIDIR:-"${SLURM_SUBMIT_DIR}"}
-DST=${DST:-"${ARCHIVE}/${INIDIR#/*/${USER}/}/"} # replicate directory tree
-# replace things like '/scratch/g/group/user/' with $ARCHIVE
-WRFOUT="${INIDIR}/wrfout/" # output folder
-SRC=${SRC:-"${WRFOUT}"} # where the data is (on disk)
+# NOTE: Operations that can be performed are: LIST, VERIFY, REMOVE, BACKUP, and RETRIEVE. These 
+#   would be specified in the MODE variable.
+RMSRC=${RMSRC:-'FALSE'} # Set to 'RMSRC' to actually perform deletion.
+# NOTE: If retrieving files, RMSRC means files on disk are overwritten.
+VERIFY=${VERIFY:-'VERIFY'} # Verify tarballs; can slow down operations significantly.
+# NOTE: Do not edit these variables; instead pass them as environment variables.
+DOMAINS=${DOMAINS:-'1234'} # String with relevant domain indices.
+DATASET=${DATASET:-'FULL'} # Default dataset is FULL meaning everything.
+# NOTE: Dataset options are: FINAL, LOGS, DIAGS, ATM3D, SNOW, DEL3D, FULL.
+# NOTE: The datasets are defined in PROCESSDATASET below.
+ARINTERVAL='YEARLY' # This's the default, which is updated by setupExperiment.
+INTERVAL=${INTERVAL:-"${ARINTERVAL}"} # Default is set by ARINTERVAL. 
+PATTERN=${PATTERN:-'_wrf.tgz'} # $TAGS inference from certain files. ?????
+PATREGX=${PATREGX:-''} # Matching regex for $TAGS: Roughly TAGS=$(ls *$PATTERN | grep -o $PATREGX).
+# NOTE: "-o, --only-matching" means print only the matched (non-empty) parts of a matching line, 
+#   with each such part on a separate output line. ?????
+TAGGLOB=${TAGGLOB:-''} # Globbing extension for $TAGS (TAGSTR="${TAG}${TAGGLOB}").
+INIDIR=${INIDIR:-"${SLURM_SUBMIT_DIR}"} # Data folder.
+DST=${DST:-"${ARCHIVE}/${INIDIR#/*/${USER}/}/"} # Replicate directory tree.
+# NOTE: ${variable#pattern} removes the shortest match to the pattern from the beginning of variable. 
+# NOTE: The above replaces things like '/scratch/g/group/user/' with $ARCHIVE.
+WRFOUT="${INIDIR}/wrfout/" # Output folder.
+SRC=${SRC:-"${WRFOUT}"} # Where the data is (on disk).
 
-# check  against : some combinations can override archives!
-# LIST, VERIFY, REMOVE, BACKUP, RETRIEVE
-# first check MODE
+
+# =================== Some checks (some combinations can override archives!) ===================
+
+# First check MODE (LIST, VERIFY, REMOVE, BACKUP, RETRIEVE)
 case "${MODE}" in
-  LIST | VERIFY | REMOVE | BACKUP | RETRIEVE )   MODEOK='FALSE';; # proceed with DATASET check
-  * )  echo -e "\nERROR: Unknown Mode '${MODE}' - aborting!\n"; exit 1;; # unknown MODE: abort
-esac # check MODE
-# then check DATASET
+  LIST | VERIFY | REMOVE | BACKUP | RETRIEVE )   MODEOK='FALSE';; # Proceed with DATASET check.
+  * )  echo -e "\nERROR: Unknown Mode '${MODE}' - aborting!\n"; exit 1;; # Unknown MODE: abort.
+esac 
+# Then check DATASET
 case "${DATASET}" in
-  FULL | MISC3D | MISCDIAG | DYN3D | DIAGS )   # datasets that correspond to archive files   
-    MODEOK='MODEOK';; # everything is OK
-  DEL3D | HYDRO | LOGS | FINAL | MarcIO )   # only REMOVE/RETRIEVE options   
-    if [[ "${MODE}" == 'BACKUP' ]]; then MODEOK='FALSE'; else MODEOK='MODEOK'; fi;; # everythin except backup
+  FULL | ATM3D | SNOW | DIAGS ) # Datasets that correspond to archive files.   
+    MODEOK='MODEOK';; # Everything is Ok.
+  DEL3D | LOGS | FINAL ) # Only REMOVE/RETRIEVE options.   
+    if [[ "${MODE}" == 'BACKUP' ]]; then MODEOK='FALSE'; else MODEOK='MODEOK'; fi;; # Everything except backup.
   * )   MODEOK='UNKNOWN';;
-esac #  vs. 
-# report error and exit, if necessary
+esac  
+# Report error and exit, if necessary
 if [[ "${MODEOK}" != 'MODEOK' ]]; then
   if [[ "${MODEOK}" == 'UNKNOWN' ]]; then
     echo -e "\nERROR: Unknown Dataset '${DATASET}' - aborting!\n"
   else
     echo -e "\nERROR: Mode '${MODE}' and Dataset '${DATASET}' incompatible - aborting!\n"
-  fi # error message
+  fi 
   exit 1  
-fi # print error output
+fi 
 
-# configure archiving interval presets
-#if [[ -n "${TAGGLOB}" ]]; then
-#  INTERVAL='CUSTOM' # use custom interval determined by the complement of $TAGGLOB
-#  PATTERN=${PATTERN:-'_wrf.tgz'} # assuming the step name is the start date
+
+# =========================== Configure archiving interval presets ===========================
+
 if [[ "${INTERVAL}" == 'YEARLY' ]]; then
   PATREGX='^[0-9][0-9][0-9][0-9]'
-  TAGGLOB='-[01][0-9]-[0123][0-9]' # match all months (01-12) and days (1-31)
+  TAGGLOB='-[01][0-9]-[0123][0-9]' # Match all months (01-12) and days (1-31).
 elif [[ "${INTERVAL}" == 'MONTHLY' ]]; then
   PATREGX='^[0-9][0-9][0-9][0-9]-[01][0-9]'
-  TAGGLOB='-[0123][0-9]' # match all days in a month
+  TAGGLOB='-[0123][0-9]' # Match all days in a month.
 elif [[ "${INTERVAL}" == 'DAILY' ]] || [[ "${INTERVAL}" == 'NONE' ]]; then
-  # N.B.: This option identifies output files by start date (day), without use of
-  #       globbing expressions; it doesn't have to archive every day.
-  PATREGX='.*' # just use everything... except $PATTERN
-  TAGGLOB='' # actually no globbing necessary
-fi # ${INTERVAL}
+  # NOTE: This option identifies output files by start date (day), without use of
+  #   globbing expressions; it doesn't have to archive every day.
+  PATREGX='.*' # Just use everything, except $PATTERN.
+  TAGGLOB='' # Actually no globbing necessary.
+fi 
 
-# check if we are using globbing expressions in filenames
+
+# Check if we are using globbing expressions in filenames
 if [[ -n "${TAGGLOB}" ]]; then GLOB='GLOB'; else GLOB='NO'; fi
 
-## function to check the contents of an HTAR archive
+
+# ===================== Function to check the contents of an HTAR archive =======================
+
 function CHECKARCHIVE () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local FILES=${2} # list of files that should be in the archive
-  local LIST=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ) # column 7 are the file names, except last two lines
-  # N.B.: can't capture exit code of htar because of $()
-  local MISS=0 # missing file counter
-  # evaluate globbing expression
+
+  # Input variables
+  local HTAR="${DST}/${1}" # Archive file (absolute path on HPSS).
+  local FILES=${2} # List of files that should be in the archive.
+  
+  # List the contents
+  local LIST=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ) 
+  # NOTE: In the above, column 7 is the file names, except last two lines.
+  # NOTE: -t lists the files in the order in which they appear in the HPSS-resident archive. 
+  #   Listable output is written to standard output; all other output is written to standard error.
+  # NOTE: "-f Archive" uses Archive as the name of archive to be read or written. This is a required 
+  #   parameter for htar, unlike the standard tar utility, which uses a built-in default name. If 
+  #   the Archive variable specified is - (minus sign), the tar command writes to standard output 
+  #   or reads from standard input. If you write to standard output, the -I option is mandatory, 
+  #   in order to specify an Index File, which is copied to HPSS if the Archive file is successfully 
+  #   written to standard output.
+  # NOTE: We can't capture the exit code of htar here because of $().
+  
+  # Missing file counter
+  local MISS=0 
+  
+  # Evaluate globbing expression
   if [[ "${GLOB}" == 'GLOB' ]]; then
-    FILES=$( ls -C ${FILES} ); fi
-  # loop over files in list and check presence in HTAR list
+    FILES=$( ls -1 ${FILES} ); fi
+  # NOTE: -1 lists entries in one column.
+  # NOTE: If FILES contains a globbing expression this will expand it to a proper list of files 
+  #   that are on disk and matching the expression.
+    
+  # Loop over files in list and check presence in HTAR list
   for FILE in ${FILES}; do
     if [[ "${FILE}" != $( echo "${LIST}" | sed -n "/${FILE}/p" ) ]]; then
-      if [[ ${MISS} == 0 ]]; then echo; fi # visually offset missing file list
-      echo "WARNING: File ${FILE} missing in archive ${HTAR}"
+    # NOTE: "/regexp/" will select any line which matches the regular expression regexp.
+    # NOTE: -n suppresses output, and the p command prints specific lines.
+      if [[ ${MISS} == 0 ]]; then echo; fi # Visually offset missing file list.
+      echo "WARNING: File ${FILE} missing in archive ${HTAR}."
       MISS=$(( ${MISS} + 1 ))
     fi
   done
-  if [[ ${MISS} != 0 ]]; then echo; fi # visually offset missing file list
-  # return number of missing files
+  
+  # Visually offset missing file list, if needed
+  if [[ ${MISS} != 0 ]]; then echo; fi 
+  
+  # Return number of missing files
   return ${MISS}
-} # CHECKARCHIVE
 
-## function to check if the contents of an HTAR archive are present on the source file system
+} 
+
+
+# ===== Function to check if the contents of an HTAR archive are present on the source file system =====
+
 function CHECKDISK () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local MODE="${2}" # report missing files or present files
-  local LIST=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ) # column 7 are the file names, except last two lines
-  # N.B.: can't capture exit code of htar because of $()
-  local MISS=0 # missing file counter
-  # check which files exist in source folder and report missing/present
-  for FILE in ${LIST}; do # no quotes! white space delimited list!
+
+  # Input variables
+  local HTAR="${DST}/${1}" # Archive file (absolute path on HPSS).
+  local MODE="${2}" # Report missing files or present files.
+  
+  # List the contents
+  local LIST=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ) 
+  # NOTE: Column 7 is the file names, except last two lines.
+  # NOTE: We can't capture exit code of htar because of $().
+  
+  # Missing file counter
+  local MISS=0 
+  
+  # Check which files exist in source folder and report missing/present
+  for FILE in ${LIST}; do 
     if [[ ! -e "${FILE}" ]] && [[ "${MODE}" == 'MISSING' ]]; then 
+    # NOTE: [ -e FILE ] is true if FILE exists.
       echo "WARNING: File ${FILE} missing in source folder!"
       MISS=$(( ${MISS} + 1 ))
     elif [[ -e "${FILE}" ]] && [[ "${MODE}" == 'PRESENT' ]]; then 
       echo "WARNING: File ${FILE} present in source folder!"
       MISS=$(( ${MISS} + 1 ))
-    fi # if -e $FILE
-  done # for $LIST
+    fi 
+  done 
+  
+  # Return the output
   return ${MISS}
-} # CHECKDISK
 
-## function to list contents of HTAR archive
+} 
+
+
+# ============================ Function to list contents of HTAR archive ===========================
+
 function LISTHTAR () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local ERR=0 # error code
-  echo "${HTAR} ::: *" # print feedback
-  # check if archive exists
-  hsi -q ls "${HTAR}" &> /dev/null # quiet mode
+
+  # Input variables
+  local HTAR="${DST}/${1}" # Archive file (absolute path on HPSS).
+  
+  # Error code
+  local ERR=0 
+  
+  # Print feedback 
+  echo "${HTAR} ::: *" 
+  # NOTE: This means everything that's inside this htar file.
+  
+  # Check if archive exists and if so, proceed
+  hsi -q ls "${HTAR}" &> /dev/null 
+  # NOTE: -q enables "quiet" mode. In this mode, extraneous messages such as the interactive file transfer 
+  #   progress messages, as well as the startup "Message of the Day" are not displayed.
   if [[ $? != 0 ]]; then
-	echo "Warning: archive ${HTAR} does not exist (or HSI failed)."
-	ERR=1
+    echo "Warning: Archive ${HTAR} does not exist (or HSI failed)."
+    ERR=1
   else
-    # list archive contents
-	htar -tvf "${HTAR}" -Hcrc -Hverify=1
-	ERR=$? # capture exit code
-	CHECKDISK "${1}" 'MISSING'
+    # List archive contents
+    htar -tvf "${HTAR}" -Hcrc -Hverify=1
+    # NOTE: -v is for "Verbose" mode. For each file processed, displays a one-character operation flag, and 
+    #   lists the name of each file. The flag values displayed are: "a" - file was added to the archive, 
+    #   "x" - file was extracted from the archive, and "i" - index file entry was created (Build Index 
+    #   operation).
+    # NOTE: -Hcrc is so that you can request that htar compute and save checksum values for each member file 
+    #   during archive operation. The checksums are saved in the corresponding htar index file. You can then 
+    #   further request that htar compute checksums of the files as you extract them from the archive and 
+    #   compare the values to what it has stored in the index file.
+    # NOTE: The -Hverify=1 is not really necessary here, but as Andre suggests, we'll keep it. 
+    # Capture exit code to return later
+    ERR=$?
+    # Check if the file contents are on disk 
+    CHECKDISK "${1}" 'MISSING'
   fi
-  # return exit code
+  
+  # Return exit code
   return ${ERR}
+
 }
 
-## function to verify contents of HTAR archive
+
+# ========================= Function to verify contents of HTAR archive =============================
+
 function VERIFYHTAR () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local FILES=${2} # list of files that should be in the archive
-  local QUIET="${3}" # suppress positive output (still print missing files!)
-  local MISS=0 # error code
-  # if globbing, just use archive table of contents
+
+  # Input variables
+  local HTAR="${DST}/${1}" # Archive file (absolute path on HPSS).
+  local FILES=${2} # List of files that should be in the archive.
+  local QUIET="${3}" # Suppress positive output (still prints missing files).
+  
+  # Error code
+  local MISS=0 
+  
+  # If globbing (meaning all files within archive), just use archive table of contents
   if [[ "${GLOB}" == 'GLOB' ]]; then
-    # get file list from table of contents (7th column, remove last two lines)
     FILES=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ); fi
-  # print expected archive contents
+    # NOTE: This gets file list from table of contents (7th column, remove last two lines).
+  # NOTE: Do note that this update is only useful if QUIET is off (because then it'll display the
+  #   updated FILES). Otherwise it is redundant, as FILES variable is not used below.  
+  
+  # If needed, print expected archive contents
   if [[ "${QUIET}" != 'QUIET' ]]; then
-    echo "${HTAR}   :::   ${FILES}"; fi # print feedback
-  # check if archive exists
-  hsi -q ls "${HTAR}" &> /dev/null # quiet mode
+    echo "${HTAR}   :::   ${FILES}"; fi   
+    
+  # Check if archive exists, and if so proceed
+  hsi -q ls "${HTAR}" &> /dev/null 
   if [[ $? != 0 ]]; then
-		echo "Warning: archive ${HTAR} does not exist (or HSI failed)."
-		MISS=1
+    echo "Warning: Archive ${HTAR} does not exist (or HSI failed)."
+    MISS=1
   else
-    # verify archive contents
+    # Check/verify archive contents
     if [[ "${VERIFY}" == 'VERIFY' ]]; then
-      # evaluate globbing expression
       if [[ "${GLOB}" == 'GLOB' ]]; then
-				htar -Kvf "${HTAR}" -Hcrc -Hverify=1 # verifying all files
-				MISS=$?
+        htar -Kvf "${HTAR}" -Hcrc -Hverify=1 # Verifying all files. 
+        # NOTE: The -K option verifies an existing tarfile in HPSS. -K verifies the contents of the 
+        #   archive, based upon the verification level options given by the -Hverify and -Hrelpaths 
+        #   options.
+        # NOTE: In "htar -Hverify=option" option can be any of the following: info (compares tar 
+        #   header info with the corresponding values in the index), crc (enables CRC checking of 
+        #   archive files for which a CRC was generated when the file is added to the archive), etc.
+        #   The numeric values for Hverify can be interpreted as follows: 0 = Enables "info" 
+        #   verification. 1 = Enables level 0 + "crc" verification. So, "-Hverify=1" verfies the 
+        #   files against the index file on archive.
+        MISS=$?
       else
-				htar -Kvf "${HTAR}" -Hcrc -Hverify=1 ${FILES}
-				MISS=$?
-      fi # $GLOB
-    else
-      # check contents without verification...
-      echo "Warning: verification is switched off - checking contents instead."
-      CHECKARCHIVE "${1}" "${2}" # check contents
-      MISS=$? # number of missing files
-    fi # $VERIFY
+        htar -Kvf "${HTAR}" -Hcrc -Hverify=1 ${FILES} # Only verify these files. 
+        MISS=$?
+      fi 
+    else # Check contents without verification.      
+      echo "Warning: Verification is switched off - checking contents instead."
+      CHECKARCHIVE "${1}" "${2}" # Check contents.
+      MISS=$? # Number of missing files.
+    fi 
   fi
-  # return exit code
+  
+  # Return exit code
   return ${MISS}
+
 }
 
-## function to remove source files of an HTAR archive
+
+# ========================== Function to remove source files of an HTAR archive ==========================
+
 function REMOVEHTAR () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local FILES=${2} # list of files that should be in the archive
-  local LIST=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ) # column 7 are the file names, except last two lines
-  local MISS=0 # missing file counter
-  # check if files are present on disk
-  # evaluate globbing expression (read list of existing files from disk)
-  if [[ "${GLOB}" == 'GLOB' ]]; then FILES=$( ls -C ${FILES} ); fi
-  # print expected archive contents
-  echo "${HTAR}   ---   ${FILES}" # print feedback
-  # check if any of the given files still exist
+  
+  # Input variables
+  local HTAR="${DST}/${1}" # Archive file (absolute path on HPSS).
+  local FILES=${2} # List of files that should be in the archive.
+  
+  # List the contents of the htar file
+  local LIST=$( htar -tf "${HTAR}" | awk '{print $7}' | head -n -2 ) 
+  # NOTE: Here column 7 is the file names, except the last two lines.
+  
+  # Missing file counter
+  local MISS=0 
+  
+  # Evaluate globbing expression (read list of existing files from disk)
+  if [[ "${GLOB}" == 'GLOB' ]]; then FILES=$( ls -1 ${FILES} ); fi
+  # NOTE: If FILES contains a globbing expression this will expand it to a proper list of files that 
+  #   are on disk and matching the expression.
+  
+  # Print expected archive contents
+  echo "${HTAR}   ---   ${FILES}" 
+  
+  # Check if any of the given files still exists
   CNT=0; for F in ${FILES}; do
     if [[ -e "${F}" ]]; then CNT=$(( CNT + 1 )); fi; done;
-  # begin removal process if any of the files are present
+    
+  # Begin removal process if any of the files is present
   if [[ -n "${CNT}" ]] && [[ ${CNT} == 0 ]]; then
-	    echo '   >>> none of the files exist anymore - skipping this step!'
-	    echo '   (use the VERIFY operation to verify integrity of the archive)'
+    echo '   >>> None of the files exist anymore - skipping this step'
+    echo '       (use the VERIFY operation to verify integrity of the archive).'
   else
-    if [[ "${VERIFY}" == 'VERIFY' ]]; then
-      # verify archive contents
+    # Check/verify archive contents
+    if [[ "${VERIFY}" == 'VERIFY' ]]; then      
       VERIFYHTAR "${1}" "${2}" 'QUIET'
       MISS=$?
-    else
-      # check contents without verification...
-      echo "Warning: verification is switched off - checking contents instead."
-      CHECKARCHIVE "${1}" "${2}" # check contents
+    else # Check contents without verification
+      echo "Warning: Verification is switched off - checking contents instead."
+      CHECKARCHIVE "${1}" "${2}" # Check contents.
       MISS=$?
-    fi # $VERIFY
+    fi 
+    # If no errors were found
     if [[ $MISS == 0 ]]; then
-      # loop over files in list and check presence in HTAR list
+      # Loop over files in list 
       for FILE in ${FILES}; do
-	      if [[ "${FILE}" == $( echo "${LIST}" | sed -n "/${FILE}/p" ) ]]; then
-	        if [[ "${RMSRC}" == 'RMSRC' ]]; then # additional safety check
-	          if [[ -e "${FILE}" ]]; then
-	            echo "   >>> removing ${FILE}"
-	            rm "${FILE}"
-	          else echo "   ### ${FILE} does not exist"; fi # -e $FILE
-	        else
-	          echo "   >>> would remove ${FILE}, if RMSRC='RMSRC' was set..."
-	        fi # RMSRC
-	      else
-	        if [[ ${MISS} == 0 ]]; then echo; fi # visually offset missing file list
-	        echo "WARNING: File ${FILE} missing in archive ${HTAR}"
-	        echo "   >>> not deleting ${FILE}"
-	        MISS=$(( ${MISS} + 1 ))
-	      fi # $FILE in HTAR
-      done # loop over $FILES
+        if [[ "${FILE}" == $( echo "${LIST}" | sed -n "/${FILE}/p" ) ]]; then
+          if [[ "${RMSRC}" == 'RMSRC' ]]; then # Additional safety check
+            if [[ -e "${FILE}" ]]; then
+              echo "   >>> Removing ${FILE}."
+              rm "${FILE}"
+            else echo "   ### ${FILE} does not exist."; fi 
+          else
+            echo "   >>> Would remove ${FILE}, if RMSRC='RMSRC' was set ..."
+          fi 
+        else
+          if [[ ${MISS} == 0 ]]; then echo; fi # Visually offset missing file list.
+          echo "WARNING: File ${FILE} missing in archive ${HTAR}."
+          echo "   >>> Not deleting ${FILE}."
+          MISS=$(( ${MISS} + 1 ))
+        fi 
+      done 
     else
       echo
-      echo "   >>>   Cannot verify integrity of archive ${HTAR} - aborting!   <<<   "
+      echo "   >>> Cannot verify integrity of archive ${HTAR} - aborting! <<< "
       echo
       MISS=1
-    fi # if HTAR OK
-  fi # if $FILES on disk
-  # return number of missing files
+    fi 
+  fi 
+  
+  # Return number of missing files
   return ${MISS}
+
 }
 
-## function to create a new HTAR archive
+
+# ================================= Function to create a new HTAR archive ================================
+
 function BACKUPHTAR () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local FILES=${2} #
-  # evaluate globbing expression
+  
+  # Input variables
+  local HTAR="${DST}${1}" # Archive file (absolute path on HPSS).
+  local FILES=${2} 
+  
+  # Evaluate globbing expression 
   if [[ "${GLOB}" == 'GLOB' ]]; then
-    FILES=$( ls -C ${FILES} ); fi # display output in columns (i.e. long lines)
-  # check if archive already exists
-  echo "${FILES}   >>>   ${HTAR}" # print feedback
-  hsi -q ls "${HTAR}" &> /dev/null # quiet mode
+    FILES=$( ls -1 ${FILES} ); fi 
+    # NOTE: This displays output in columns.
+  # NOTE: If FILES contains a globbing expression this will expand it to a proper list of files that 
+  #   are on disk and matching the expression.   
+  
+  # Print feedback
+  echo -e "FILES =\n${FILES}\n>>>\nHTAR =${HTAR}"  
+  
+  # Check if archive already exists
+  hsi -q ls "${HTAR}" &> /dev/null 
   if [[ $? == 0 ]]; then
-    echo "Warning: archive ${HTAR} already exists - checking contents."
-    CHECKARCHIVE "${1}" "${2}" # check contents
+    echo "Warning: Archive ${HTAR} already exists - checking contents."
+    CHECKARCHIVE "${1}" "${2}" # Check contents.
     if [[ $? == 0 ]]; then
-      echo "   Archive OK, skipping backup..."
+      echo "Archive OK, skipping backup ..."
       return 0
     else
-      echo 'Archive contents are different: need to check, if all files are present on source file system.'
+      echo 'Archive contents are different: Need to check, if all files are present on source file system.'
       CHECKDISK "${1}" 'MISSING'
       if [[ $? == 0 ]]; then 
-				echo "   WARNING: All archive contents are present - removing old archive and creating new."
-				hsi -q rm "${HTAR}"
+        echo "WARNING: All archive contents are present - removing old archive and creating new."
+        hsi -q rm "${HTAR}"
+        # NOTE: -q enables "quiet" mode. In this mode, extraneous messages such as the interactive file 
+        #   transfer progress messages, as well as the startup "Message of the Day" are not displayed.
       else
-				echo "   WARNING: Some archive contents are missing on source file system - cannot replace archive."
-				echo "   (Retrieve current contents first, before recreating the new archive.)" 
-				exit 1 # this is an error
-      fi # CHECKDISK
-    fi # CHECKARCHIVE
-  fi # archive already exists
-  # create archive
-  htar -cpf "${HTAR}" -Humask=0137 -Hcrc -Hverify=1 ${FILES}
-  ERR=$? # capture exit code
-  # verify contents/completion
-  if [[ $ERR != 0 ]]; then
-	# report error
-	echo "   ERROR: HTAR did not complete successfully; exit code ${ERR}"
-	MISS=$ERR # use as exit code below
-  elif [[ "${VERIFY}" == 'VERIFY' ]]; then
-    # verify archive contents
-    echo "Verifying contents (not sure if this is necessary, but doesn't hurt.)"
-    VERIFYHTAR "${1}" "${2}" 'QUIET'
-    MISS=$? # capture exit code: number of missing files
+        echo "WARNING: Some archive contents are missing on source file system - cannot replace archive"
+        echo "(retrieve current contents first, before recreating the new archive)." 
+        exit 1 
+      fi 
+    fi 
+  fi 
+  
+  # Create archive, store output message and remove redundant error messages 
+  TMPFOLDER="/dev/shm/${USER}_ar_tmp_${SLURM_JOBID}"
+  mkdir -p ${TMPFOLDER}
+  TMPFILE="/dev/shm/${USER}_ar_tmp_${SLURM_JOBID}/htarout.out"
+  htar -cpf "${HTAR}" -Humask=0137 -Hcrc -Hverify=1 ${FILES} &> ${TMPFILE}
+  sed -i '/ERROR: \[Uint32_tToOctal\]Octal field \[thb_[ug]id\] overflow \- width=8 value=/d' ${TMPFILE}
+  # NOTE: "sed -i '/string/d' FILE" edits FILE in place and removes any lines containing string.
+  # NOTE: As the errors of the type "ERROR: [Uint32_tToOctal]Octal field [thb_[ug]id] overflow - width=8 value=..."
+  #   are not actual errors, we do remove these from the output message, to not confuse them with actual errors.
+  HTAROUT=$(cat ${TMPFILE})  
+  rm -rf ${TMPFOLDER}   
+
+  # Check the output message
+  if [[ -n $( echo ${HTAROUT} | sed -n "/HTAR SUCCESSFUL/p" ) ]]; then
+  # NOTE: "/regexp/" will select any line which matches the regular expression regexp.
+  # NOTE: -n suppresses output, and the p command prints specific lines.
+      echo ${HTAROUT}
   else
-    # verify without verification...
-    echo "Warning: verification is switched off - checking contents instead."
-    CHECKARCHIVE "${1}" "${2}" # check contents
-    MISS=$? # capture exit code: number of missing files
-  fi # $VERIFY
-  # return results of verification
+      echo 'HTAR failed!'
+      exit 1
+  fi
+  
+  # Capture exit code
+  ERR=$? 
+  
+  # Check/verify contents/completion
+  if [[ $ERR != 0 ]]; then
+    echo "   ERROR: HTAR did not complete successfully; exit code ${ERR}."
+    MISS=$ERR # Use as exit code below.
+  elif [[ "${VERIFY}" == 'VERIFY' ]]; then
+    echo "Verifying contents (not sure if this is necessary, but doesn't hurt)."
+    VERIFYHTAR "${1}" "${2}" 'QUIET'
+    MISS=$? # Capture exit code: number of missing files.
+  else # Check contents without verification.
+    echo "Warning: Verification is switched off - checking contents instead."
+    CHECKARCHIVE "${1}" "${2}" # Check contents.
+    MISS=$? # Capture exit code: number of missing files.
+  fi 
+  
+  # Return results of verification
   return $MISS
+
 }
 
-## function to create a new HTAR archive
+
+# ============================= Function to retrieve HTAR archive ==============================
+
 function RETRIEVEHTAR () {
-  local HTAR="${DST}/${1}" # archive file (absolute path on HPSS)
-  local FILES=${2} # list of files to extract
-  local MISS=0 # exit code
-  # if globbing, just use archive table of contents
+
+  # Input variables
+  local HTAR="${DST}/${1}" # Archive file (absolute path on HPSS).
+  local FILES=${2} # List of files to extract.
+  
+  # Exit code
+  local MISS=0 
+  
+  # If globbing, just use archive table of contents (this applies globbing expression to 
+  #   file list using fake files on RAM-disk)
   if [[ "${GLOB}" == 'GLOB' ]]; then
-    # get file list from table of contents (7th column, remove last two lines)
     FILELIST=$( htar -tf ${HTAR} | awk '{print $7}' | head -n -2 )
-    # apply globbing expression to file list using fake files on RAM-disk
-    TMP="/dev/shm/${USER}_ar_tmp_${SLURM_JOBID}/" # temporary working folder on RAM-disk
-    mkdir -p "${TMP}"; cd "${TMP}" # create temporary folder and go into it
-    for F in $FILELIST; do touch "$F"; done # create dummy files from list
-    FILES=$( ls -C ${FILES} ) # get formatted file list (entries as columns)
-    cd -; rm -r "${TMP}" # return to previous folder and clean up
-  fi # $GLOB
-  echo "${HTAR}   >>>   ${FILES}" # print feedback
-  # check if archive exists and verify integrity (VERIFYHTAR checks existence)
+    # NOTE: This gets file list from table of contents (7th column, remove last two lines).
+    TMP="/dev/shm/${USER}_ar_tmp_${SLURM_JOBID}/" # Temporary working folder on RAM-disk.
+    mkdir -p "${TMP}"; cd "${TMP}" # Create temporary folder and go into it.
+    for F in $FILELIST; do touch "$F"; done # Create dummy files from list.
+    FILES=$( ls -1 ${FILES} ) # Get formatted file list (entries as a column).
+    cd - 1>/dev/null; rm -r "${TMP}" # Return to previous folder and clean up.
+    # NOTE: "cd -" returns to previous working directory.
+  fi
+  # NOTE: This is because we can not do "ls -1" on the contents of the htar and we need to 
+  #   make fake contents. 
+  
+  # Print feedback
+  echo -e "HTAR =${HTAR}\n>>>\nFILES =\n${FILES}" 
+  
+  # Check if archive exists and check/verify integrity; if Ok, continue
   if [[ "${VERIFY}" == 'VERIFY' ]]; then
-    # verify archive contents
     echo "Verifying contents."
     VERIFYHTAR "${1}" "${2}" 'QUIET'
     MISS=$?
-  else
-    # verify without verification...
-    echo "Warning: verification is switched off - checking contents instead."
-    CHECKARCHIVE "${1}" "${2}" # check contents
+  else # Check contents without verification.
+    echo "Warning: Verification is switched off - checking contents instead."
+    CHECKARCHIVE "${1}" "${2}" # Check contents.
     MISS=$?
-  fi # $VERIFY
+  fi 
   if [[ $MISS != 0 ]]; then
-	  echo "Warning: verification of archive ${HTAR} failed - aborting!"
-  else # if verified
+    echo "Warning: Verification of archive ${HTAR} failed - aborting!"
+  else
+    # Display message 
     echo "Archive ${HTAR} exists - contents OK."
-    # evaluate globbing expression
-    echo
-    if [[ "${RMSRC}" == 'RMSRC' ]]; then
-      # check which files already exist, and report them (will get clobbered)
-      CHECKDISK "${1}" 'PRESENT'
+    # If ${RMSRC} is set to 'RMSRC', existing files will get clobbered
+    if [[ "${RMSRC}" == 'RMSRC' ]]; then      
+      CHECKDISK "${1}" 'PRESENT' # Check if files already exist (will get clobbered).
       if [[ $? != 0 ]]; then echo "WARNING: Clobbering existing files!"; fi      
-      # extract archive
-      htar -xpmf "${HTAR}" -Hcrc -Hverify=1 ${FILES} # all files: globbing and clobbering
-	    MISS=$?
-    else
-      # check which files already exist, and skip them (don't clobber)
-      NFS=''; for F in ${FILES}; do # no quotes! white space delimited list!
-		  	if [[ ! -e "${F}" ]]; then NFS="${NFS} ${F}"; fi; done
+      htar -xpmf "${HTAR}" -Hcrc -Hverify=1 ${FILES} 
+      MISS=$?
+    else # Check which files already exist, and skip them (don't clobber).
+      NFS='' 
+      for F in ${FILES}; do 
+        if [[ ! -e "${F}" ]]; then NFS="${NFS} ${F}"; fi; done
       if [[ -n "${NFS}" ]]; then
-				echo "Skipping existing files; retrieving ${NFS}"	
-				htar -xpmf "${HTAR}" -Hcrc -Hverify=1 ${NFS} # extract archive
-				MISS=$?
+        echo "Skipping existing files; retrieving ${NFS}."	
+        htar -xpmf "${HTAR}" -Hcrc -Hverify=1 ${NFS} 
+        MISS=$?
       else
-  		  echo 'Files already exist in destination folder; run with $RMSRC=RMSRC to overwrite.'
-      fi # $NFS
-      echo
-	  fi # $CLOBBER    
-    
-  fi # if verified
-  # verify contents and return result
+        echo 'Files already exist in destination folder; run with $RMSRC=RMSRC to overwrite.'
+      fi 
+    fi    
+  fi 
+  
+  # Return result
   return ${MISS}
+
 }
 
-## function to back up one output dataset
-# N.B.: this function is specific to the WRF output configuration; it
-#       has to be redefined, to accommodate different output configurations
+
+# ============================= Function to back up one output dataset ===============================
+
+# NOTE: This function is specific to the WRF output configuration; it has to be redefined, to 
+#   accommodate different output configurations.
+
 function PROCESSDATASET () {
-  local DATE="${1}" # the current $TAG, in this context (WRF) the date...
-  local ERR=0 # error counter
-  ## define datasets
-  DATENAME="${DATE}" # used in archive file names etc.  
-  # use globbing expression if asked
+
+  # Input variables
+  local DATE="${1}" # The current $TAG; in this context (WRF) the date.
+  
+  # Error counter
+  local ERR=0 
+  
+  # Date name (used in archive file names, etc)
+  DATENAME="${DATE}"   
+  
+  # Date string (used in output data file names); use globbing expression, if asked
   if [[ "${GLOB}" == 'GLOB' ]]; 
-    then DATESTR="${DATE}${TAGGLOB}"
-    else DATESTR="${DATE}"  # used in output data file names
-  fi # GLOB
-  unset FINAL DIAGS MARCIO MISC_D1 DYN_D1 MISC_D2 DYN_D2 MISC_D3 DYN_D3 STATIC LOGS
-  # special case, if TAG/DATE is FINAL
-  if [[ "${DATE}" == 'FINAL_ALL' ]] &&  [[ "${MODE}" == 'BACKUP' ]]; then # all domains, all time steps
-    local FINAL="static.tgz wrfconst_d??.nc wrfrst_d??_* *_pyWPS.tgz *_real.tgz *_wrf.tgz *_logs.tgz" # put configuration files, all logs, and restart files into one archive
-  # N.B.: due to the use of hard-coded regular expressions, this really only works for backup of existing data
-  elif [[ "${DATE}" == 'FINAL' ]] &&  [[ "${MODE}" == 'BACKUP' ]]; then # all domains, only last time step
-    local FINAL="static.tgz *_pyWPS.tgz *_real.tgz *_wrf.tgz *_logs.tgz" # put configuration files, all logs, and restart files into one archive
+    then DATESTR="${DATE}${TAGGLOB}" 
+    else DATESTR="${DATE}"  
+  fi 
+  
+  # Unset some variables
+  unset FINAL STATIC LOGS DIAGS_D1 DIAGS_D2 DIAGS_D3 DIAGS_D4 ATM3D_D1 ATM3D_D2 ATM3D_D3 ATM3D_D4 SNOW_D1 SNOW_D2 SNOW_D3 SNOW_D4 
+  
+  # First, 2 special cases (if TAG/DATE has FINAL)
+  if [[ "${DATE}" == 'FINAL' ]] &&  [[ "${MODE}" == 'BACKUP' ]]; then 
+    local FINAL="static.tgz *_pyWPS.tgz *_real.tgz *_wrf.tgz *_logs.tgz" 
     for D in $( echo "${DOMAINS}" | fold --width=1 ); do
-      LSTRST=$( ls wrfrst_d0${D}_* | tail -n 1 ) # last restart for every domain
+    # NOTE: The fold command wraps each line of input text to fit a specified line width.
+      LSTRST=$( ls wrfrst_d0${D}_* | tail -n 1 ) # Last restart for every domain.
+      # NOTE: The tail command is used to display the last lines of one or more files. The '-n' option is 
+      #   for the specified number of lines.
       FINAL="${FINAL} wrfconst_d0${D}.nc ${LSTRST}"
-    done # $DOMAINS
-  elif [[ "${DATASET}" == 'FINAL' ]] &&  [[ "${MODE}" == 'RETRIEVE' ]]; then # all domains, only specified date; only for retrieval
-    local FINAL="static.tgz ${DATESTR}_pyWPS.tgz ${DATESTR}_real.tgz ${DATESTR}_wrf.tgz" # configuration files and restart files in one archive
-    # N.B.: Logs can not be retrieved with this method, because they do not follow the ${DATESTR}_logs.tgz format (use DATASET=LOGS instead).
+      # NOTE: This is to make sure that the last restart file gets backed-up. The run script uses this at
+      #   the last step automatically. Other files within this archive are not actually needed.
+    done 
+  elif [[ "${DATASET}" == 'FINAL' ]] &&  [[ "${MODE}" == 'RETRIEVE' ]]; then 
+    local FINAL="static.tgz ${DATESTR}_pyWPS.tgz ${DATESTR}_real.tgz ${DATESTR}_wrf.tgz" 
     for D in $( echo "${DOMAINS}" | fold --width=1 ); do
-      FINAL="${FINAL} wrfconst_d0${D}.nc wrfrst_d0${D}_${DATESTR} wrfconst_d0${D}"
-    done # $DOMAINS
-  elif [[ "${DATASET}" == 'MarcIO' ]] && [[ "${MODE}" == 'RETRIEVE' ]]; then      
-  	# Marc's special archvie stream (MarcIO) (all domains in one file)
-  	local MARCIO='' # construct file list using a loop over domain indicies
-  	for D in $( echo "${DOMAINS}" | fold --width=1 ); do
-  	  MARCIO="${MARCIO} wrfxtrm_d0${D}_${DATESTR}_??[:_]??[:_]??*"
-  	  # N.B.: restart files are only added on request, because they are large and are usually retrieved individually (manually)
-      if [[ "$MarcRst" == 'MarcRst' ]]; then MARCIO="${MARCIO} wrfrst_d0${D}_${DATESTR}_??[:_]??[:_]??*"; fi
-  	done # $DOMAINS
+      FINAL="${FINAL} wrfconst_d0${D}.nc wrfrst_d0${D}_${DATESTR}"
+    done 
+    # NOTE: In this case the user is supposed to supply DATESTR as an argument.
+    # NOTE: Typically, doing DATESTR of YYYY-MM* would match all the files above.
+    # NOTE: If we do yearly archiving and DATESTR of YYYY-MM*, then Logs can not be retrieved with this 
+    #   method, because they do not follow the ${DATESTR}_logs.tgz format (use DATASET=LOGS instead).
+    #   However, if we specify that archiving is yearly and the DATESTR as YYYY* (rather than YYYY-MM*) 
+    #   then they will follow the format. Another scenario is that you do back up every month in which 
+    #   case log files also match YYYY-MM* format. However, we just did not put the LOGS here (because
+    #   it does not work in the commonly-used case). 
+  # Other cases
   else
-    ## select datasets and logs
-    # logs and static data
+    # Logs and static data
     if [[ "${DATASET}" == 'LOGS' ]] || [[ "${DATASET}" == 'DIAGS' ]] || [[ "${DATASET}" == 'FULL' ]]; then
-      local STATIC="static.tgz" # only on cold start, otherwise skip
+      local STATIC="static.tgz" 
       for D in $( echo "${DOMAINS}" | fold --width=1 ); do
-	      STATIC="${STATIC} wrfconst_d0${D}.nc"
-      done # $DOMAINS
-      local LOGS="${DATE}*_pyWPS.tgz ${DATE}*_real.tgz ${DATE}*_wrf.tgz ${DATENHAME}_logs.tgz"
-      # N.B.: log files have the tep name and not the date in their file name, hence the irregularity
-    # only smaller diagnostics (all domains in one file)
-    fi; if [[ "${DATASET}" == 'DIAGS' ]] || [[ "${DATASET}" == 'MISCDIAG' ]] || [[ "${DATASET}" == 'FULL' ]]; then      
-      local DIAGS='' # construct file list using a loop over domain indicies
-      for D in $( echo "${DOMAINS}" | fold --width=1 ); do
-	      DIAGS="${DIAGS} wrfxtrm_d0${D}_${DATESTR}_??[:_]??[:_]??* wrfsrfc_d0${D}_${DATESTR}_??[:_]??[:_]??* wrfplev3d_d0${D}_${DATESTR}_??[:_]??[:_]??*"
-      done # $DOMAINS
-  	fi; if [[ "${DATASET}" == 'FULL' ]] && [[ "${MarcRst}" == 'MarcRst' ]]; then      
-	    # Marc's special archvie stream (MarcIO) (all domains in one file)
-	    local MARCIO='' # construct file list using a loop over domain indicies
-	    for D in $( echo "${DOMAINS}" | fold --width=1 ); do
-	      MARCIO="${MARCIO} wrfxtrm_d0${D}_${DATESTR}_??[:_]??[:_]??* wrfrst_d0${D}_${DATESTR}_??[:_]??[:_]??*"
-	      # N.B.: include xtrm and rst files, but omit flake (redundant with srfc)
-	    done # $DOMAINS
-    ## select domain-wise datasets
-    # misc 3D fields (one file per domain)
-    fi; if [[ "${DATASET}" == 'MISC3D' ]] || [[ "${DATASET}" == 'DEL3D' ]] || [[ "${DATASET}" == 'FULL' ]]; then
-      local MISC_D1="wrfmoist3d_d01_${DATESTR}_??[:_]??[:_]??* wrffdda_d01_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D2="wrfmoist3d_d02_${DATESTR}_??[:_]??[:_]??*" #  wrfrad_d0?_${DATESTR}_??[:_]??[:_]??*
-      local MISC_D3="wrfmoist3d_d03_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D4="wrfmoist3d_d04_${DATESTR}_??[:_]??[:_]??*"
-      if [[ "${MarcRst}" != 'MarcRst' ]]; then
-        local MISC_D1="${MISC_D1} wrfrst_d01_${DATESTR}_??[:_]??[:_]??*" 
-        local MISC_D2="${MISC_D2} wrfrst_d02_${DATESTR}_??[:_]??[:_]??*" 
-        local MISC_D3="${MISC_D3} wrfrst_d03_${DATESTR}_??[:_]??[:_]??*" 
-        local MISC_D4="${MISC_D4} wrfrst_d04_${DATESTR}_??[:_]??[:_]??*" 
-        # N.B.: adding restart files to MISC3D by default can cause an error, if a archiving step has no
-        #       restart files at all, this is, however, extremely unlikely (possibly the first step)
-      fi # unless we are dealing with Marc's IO config, restart files are in MISC3D
-    # some more misc 3D fields that are added separately (they are not in DEL3D, but in HYDRO)
-    fi; if [[ "${DATASET}" == 'MISC3D' ]] || [[ "${DATASET}" == 'MISCDIAG' ]] || [[ "${DATASET}" == 'FULL' ]]; then # not part of DEL3D!
-      local MISC_D1="${MISC_D1} wrflsm_d01_${DATESTR}_??[:_]??[:_]??* wrfrad_d01_${DATESTR}_??[:_]??[:_]??* wrfhydro_d01_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D2="${MISC_D2} wrflsm_d02_${DATESTR}_??[:_]??[:_]??* wrfrad_d02_${DATESTR}_??[:_]??[:_]??* wrfhydro_d02_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D3="${MISC_D3} wrflsm_d03_${DATESTR}_??[:_]??[:_]??* wrfrad_d03_${DATESTR}_??[:_]??[:_]??* wrfhydro_d03_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D4="${MISC_D4} wrflsm_d04_${DATESTR}_??[:_]??[:_]??* wrfrad_d04_${DATESTR}_??[:_]??[:_]??* wrfhydro_d04_${DATESTR}_??[:_]??[:_]??*"
-    # 3D dry dynamics (one file per domain)
-    fi; if [[ "${DATASET}" == 'DYN3D' ]] || [[ "${DATASET}" == 'DEL3D' ]] || [[ "${DATASET}" == 'FULL' ]]; then
-      local DYN_D1="wrfdrydyn3d_d01_${DATESTR}_??[:_]??[:_]??*"
-      local DYN_D2="wrfdrydyn3d_d02_${DATESTR}_??[:_]??[:_]??*"
-      local DYN_D3="wrfdrydyn3d_d03_${DATESTR}_??[:_]??[:_]??*"
-      local DYN_D4="wrfdrydyn3d_d04_${DATESTR}_??[:_]??[:_]??*"
-    # small files in misc 3D fields
-    fi; if [[ "${DATASET}" == 'HYDRO' ]]; then
-      local MISC_D1="wrflsm_d01_${DATESTR}_??[:_]??[:_]??* wrfrad_d01_${DATESTR}_??[:_]??[:_]??* wrfhydro_d01_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D2="wrflsm_d02_${DATESTR}_??[:_]??[:_]??* wrfrad_d02_${DATESTR}_??[:_]??[:_]??* wrfhydro_d02_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D3="wrflsm_d03_${DATESTR}_??[:_]??[:_]??* wrfrad_d03_${DATESTR}_??[:_]??[:_]??* wrfhydro_d03_${DATESTR}_??[:_]??[:_]??*"
-      local MISC_D4="wrflsm_d04_${DATESTR}_??[:_]??[:_]??* wrfrad_d04_${DATESTR}_??[:_]??[:_]??* wrfhydro_d04_${DATESTR}_??[:_]??[:_]??*"
-    fi # HYDRO
-    # return error if dataset not found
-    if [[ -z "${FINAL}" ]] && [[ -z "${DIAGS}" ]] && [[ -z "${MISC_D1}" ]] && [[ -z "${MISC_D2}" ]] && [[ -z "${MISC_D3}" ]] && [[ -z "${MISC_D4}" ]] && [[ -z "${DYN_D1}" ]] && [[ -z "${DYN_D2}" ]] && [[ -z "${DYN_D3}" ]] && [[ -z "${DYN_D4}" ]]
+        STATIC="${STATIC} wrfconst_d0${D}.nc"
+      done 
+      local LOGS="${DATE}*_pyWPS.tgz ${DATE}*_real.tgz ${DATE}*_wrf.tgz ${DATENAME}_logs.tgz"
+      # NOTE: The log files have the step name and not the date in their file name, hence the irregularity.
+    # Diagnostics (one file per domain)
+    fi; if [[ "${DATASET}" == 'DIAGS' ]] || [[ "${DATASET}" == 'FULL' ]]; then      
+      DIAGS_D1="wrffdda_d01_${DATESTR}_??[:_]??[:_]??* wrfxtrm_d01_${DATESTR}_??[:_]??[:_]??* wrfsrfc_d01_${DATESTR}_??[:_]??[:_]??* wrfplev3d_d01_${DATESTR}_??[:_]??[:_]??* wrflsm_d01_${DATESTR}_??[:_]??[:_]??* wrfrad_d01_${DATESTR}_??[:_]??[:_]??* wrfhydro_d01_${DATESTR}_??[:_]??[:_]??*"
+      DIAGS_D2="wrfxtrm_d02_${DATESTR}_??[:_]??[:_]??* wrfsrfc_d02_${DATESTR}_??[:_]??[:_]??* wrfplev3d_d02_${DATESTR}_??[:_]??[:_]??* wrflsm_d02_${DATESTR}_??[:_]??[:_]??* wrfrad_d02_${DATESTR}_??[:_]??[:_]??* wrfhydro_d02_${DATESTR}_??[:_]??[:_]??*"  
+      DIAGS_D3="wrfxtrm_d03_${DATESTR}_??[:_]??[:_]??* wrfsrfc_d03_${DATESTR}_??[:_]??[:_]??* wrfplev3d_d03_${DATESTR}_??[:_]??[:_]??* wrflsm_d03_${DATESTR}_??[:_]??[:_]??* wrfrad_d03_${DATESTR}_??[:_]??[:_]??* wrfhydro_d03_${DATESTR}_??[:_]??[:_]??*"
+      DIAGS_D4="wrfxtrm_d04_${DATESTR}_??[:_]??[:_]??* wrfsrfc_d04_${DATESTR}_??[:_]??[:_]??* wrfplev3d_d04_${DATESTR}_??[:_]??[:_]??* wrflsm_d04_${DATESTR}_??[:_]??[:_]??* wrfrad_d04_${DATESTR}_??[:_]??[:_]??* wrfhydro_d04_${DATESTR}_??[:_]??[:_]??*"
+    # Large 3D fields (one file per domain)
+    fi; if [[ "${DATASET}" == 'ATM3D' ]] || [[ "${DATASET}" == 'DEL3D' ]] || [[ "${DATASET}" == 'FULL' ]]; then
+      local ATM3D_D1="wrfdrydyn3d_d01_${DATESTR}_??[:_]??[:_]??* wrfmoist3d_d01_${DATESTR}_??[:_]??[:_]??* wrfrst_d01_${DATESTR}_??[:_]??[:_]??*"
+      local ATM3D_D2="wrfdrydyn3d_d02_${DATESTR}_??[:_]??[:_]??* wrfmoist3d_d02_${DATESTR}_??[:_]??[:_]??* wrfrst_d02_${DATESTR}_??[:_]??[:_]??*" 
+      local ATM3D_D3="wrfdrydyn3d_d03_${DATESTR}_??[:_]??[:_]??* wrfmoist3d_d03_${DATESTR}_??[:_]??[:_]??* wrfrst_d03_${DATESTR}_??[:_]??[:_]??*"
+      local ATM3D_D4="wrfdrydyn3d_d04_${DATESTR}_??[:_]??[:_]??* wrfmoist3d_d04_${DATESTR}_??[:_]??[:_]??* wrfrst_d04_${DATESTR}_??[:_]??[:_]??*"
+    # Snow files (one file per domain)
+    fi; if [[ "${DATASET}" == 'SNOW' ]] || [[ "${DATASET}" == 'DEL3D' ]] || [[ "${DATASET}" == 'FULL' ]]; then 
+      local SNOW_D1="wrfsnow_d01_${DATESTR}_??[:_]??[:_]??*"
+      local SNOW_D2="wrfsnow_d02_${DATESTR}_??[:_]??[:_]??*"
+      local SNOW_D3="wrfsnow_d03_${DATESTR}_??[:_]??[:_]??*"
+      local SNOW_D4="wrfsnow_d04_${DATESTR}_??[:_]??[:_]??*"
+    fi 
+    # Check if the contents of the variables exist    
+    export IFS=$'\n '
+    local FINAL_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrffinal.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${FINAL}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        FINAL_CHECKED="${FINAL_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${FINAL_CHECKED} ]]; then
+      FINAL=${FINAL_CHECKED}    
+    else
+      unset FINAL
+      echo 'FINAL assigned files did not exist. FINAL was unset.'
+    fi   
+    local STATIC_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfstatic.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${STATIC}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        STATIC_CHECKED="${STATIC_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${STATIC_CHECKED} ]]; then
+      STATIC=${STATIC_CHECKED}    
+    else
+      unset STATIC
+      echo 'STATIC assigned files did not exist. STATIC was unset.'
+    fi
+    local LOGS_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfdiags_d01_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${LOGS}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        LOGS_CHECKED="${LOGS_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${LOGS_CHECKED} ]]; then
+      LOGS=${LOGS_CHECKED}    
+    else
+      unset LOGS
+      echo 'LOGS assigned files did not exist. LOGS was unset.'
+    fi
+    local DIAGS_D1_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfdiags_d01_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${DIAGS_D1}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        DIAGS_D1_CHECKED="${DIAGS_D1_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${DIAGS_D1_CHECKED} ]]; then
+      DIAGS_D1=${DIAGS_D1_CHECKED}    
+    else
+      unset DIAGS_D1
+      echo 'DIAGS_D1 assigned files did not exist. DIAGS_D1 was unset.'
+    fi
+    local DIAGS_D2_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfdiags_d02_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${DIAGS_D2}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        DIAGS_D2_CHECKED="${DIAGS_D2_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${DIAGS_D2_CHECKED} ]]; then
+      DIAGS_D2=${DIAGS_D2_CHECKED}    
+    else
+      unset DIAGS_D2
+      echo 'DIAGS_D2 assigned files did not exist. DIAGS_D2 was unset.'
+    fi
+    local DIAGS_D3_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfdiags_d03_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${DIAGS_D3}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        DIAGS_D3_CHECKED="${DIAGS_D3_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${DIAGS_D3_CHECKED} ]]; then
+      DIAGS_D3=${DIAGS_D3_CHECKED}    
+    else
+      unset DIAGS_D3
+      echo 'DIAGS_D3 assigned files did not exist. DIAGS_D3 was unset.'
+    fi
+    local DIAGS_D4_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfdiags_d04_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${DIAGS_D4}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        DIAGS_D4_CHECKED="${DIAGS_D4_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${DIAGS_D4_CHECKED} ]]; then
+      DIAGS_D4=${DIAGS_D4_CHECKED}    
+    else
+      unset DIAGS_D4
+      echo 'DIAGS_D4 assigned files did not exist. DIAGS_D4 was unset.'
+    fi    
+    local ATM3D_D1_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfatm_d01_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${ATM3D_D1}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        ATM3D_D1_CHECKED="${ATM3D_D1_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${ATM3D_D1_CHECKED} ]]; then
+      ATM3D_D1=${ATM3D_D1_CHECKED}    
+    else
+      unset ATM3D_D1
+      echo 'ATM3D_D1 assigned files did not exist. ATM3D_D1 was unset.'
+    fi
+    local ATM3D_D2_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfatm_d02_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${ATM3D_D2}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        ATM3D_D2_CHECKED="${ATM3D_D2_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${ATM3D_D2_CHECKED} ]]; then
+      ATM3D_D2=${ATM3D_D2_CHECKED}    
+    else
+      unset ATM3D_D2
+      echo 'ATM3D_D2 assigned files did not exist. ATM3D_D2 was unset.'
+    fi  
+    local ATM3D_D3_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfatm_d03_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${ATM3D_D3}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        ATM3D_D3_CHECKED="${ATM3D_D3_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${ATM3D_D3_CHECKED} ]]; then
+      ATM3D_D3=${ATM3D_D3_CHECKED}    
+    else
+      unset ATM3D_D3
+      echo 'ATM3D_D3 assigned files did not exist. ATM3D_D3 was unset.'
+    fi 
+    local ATM3D_D4_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfatm_d04_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${ATM3D_D4}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        ATM3D_D4_CHECKED="${ATM3D_D4_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${ATM3D_D4_CHECKED} ]]; then
+      ATM3D_D4=${ATM3D_D4_CHECKED}    
+    else
+      unset ATM3D_D4
+      echo 'ATM3D_D4 assigned files did not exist. ATM3D_D4 was unset.'
+    fi 
+    local SNOW_D1_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfsnow_d01_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${SNOW_D1}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        SNOW_D1_CHECKED="${SNOW_D1_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${SNOW_D1_CHECKED} ]]; then
+      SNOW_D1=${SNOW_D1_CHECKED}    
+    else
+      unset SNOW_D1
+      echo 'SNOW_D1 assigned files did not exist. SNOW_D1 was unset.'
+    fi 
+    local SNOW_D2_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfsnow_d02_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${SNOW_D2}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        SNOW_D2_CHECKED="${SNOW_D2_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${SNOW_D2_CHECKED} ]]; then
+      SNOW_D2=${SNOW_D2_CHECKED}    
+    else
+      unset SNOW_D2
+      echo 'SNOW_D2 assigned files did not exist. SNOW_D2 was unset.'
+    fi
+    local SNOW_D3_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfsnow_d03_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${SNOW_D3}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        SNOW_D3_CHECKED="${SNOW_D3_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${SNOW_D3_CHECKED} ]]; then
+      SNOW_D3=${SNOW_D3_CHECKED}    
+    else
+      unset SNOW_D3
+      echo 'SNOW_D3 assigned files did not exist. SNOW_D3 was unset.'
+    fi
+    local SNOW_D4_CHECKED=""
+    if [[ ${MODE} == 'RETRIEVE' ]]; then    
+      local TAR_FILES=$( htar -tf ${DST}"/wrfsnow_d04_${DATENAME}.tar" 2>/dev/null | awk '{print $7}' | head -n -2 )
+    fi     
+    for word in ${SNOW_D4}; do
+      if [[ ${MODE} == 'BACKUP' ]]; then
+        local EXIST=$( ls ${word} 2>/dev/null )
+      elif [[ ${MODE} == 'RETRIEVE' ]]; then
+        unset EXIST
+        for word_tf in ${TAR_FILES}; do
+          if [[ ${word_tf} == ${word} ]]; then
+            EXIST="EXIST" 
+          fi
+        done
+      fi  
+      if [[ -n ${EXIST} ]]; then
+        SNOW_D4_CHECKED="${SNOW_D4_CHECKED} ${word}"
+      fi  
+    done  
+    if [[ -n ${SNOW_D4_CHECKED} ]]; then
+      SNOW_D4=${SNOW_D4_CHECKED}    
+    else
+      unset SNOW_D4
+      echo 'SNOW_D4 assigned files did not exist. SNOW_D4 was unset.'
+    fi            
+    # Return error if needed
+    if [[ -z "${FINAL}" ]] && [[ -z "${STATIC}" ]] && [[ -z "${LOGS}" ]] && [[ -z "${DIAGS_D1}" ]] && [[ -z "${DIAGS_D2}" ]] && [[ -z "${DIAGS_D3}" ]] && [[ -z "${DIAGS_D4}" ]] && [[ -z "${ATM3D_D1}" ]] && [[ -z "${ATM3D_D2}" ]] && [[ -z "${ATM3D_D3}" ]] && [[ -z "${ATM3D_D4}" ]] && [[ -z "${SNOW_D1}" ]] && [[ -z "${SNOW_D2}" ]] && [[ -z "${SNOW_D3}" ]] && [[ -z "${SNOW_D4}" ]]
       then
-	      echo
-	      if [[ "${DATASET}" == 'DYN3D' ]] || [[ "${DATASET}" == 'MISC3D' ]] || [[ "${DATASET}" == 'MISCDIAG' ]] || [[ "${DATASET}" == 'FULL' ]] || [[ "${DATASET}" == 'LOGS' ]] || [[ "${DATASET}" == 'DIAGS' ]] || [[ "${DATASET}" == 'HYDRO' ]]
-					then # known dataset but other problem
-					  echo "   >>>   WARNING: dataset ${DATASET} can not be used in the desired configuration! (aborting)   <<<   "
-					else # unknown dataset
-					  echo "   >>>   WARNING: dataset ${DATASET} not found! (aborting)   <<<   "
-	      fi # DATASET
-	      echo
-	      return 1
-    fi # DIAGS etc.
-  fi # if TAG=FINAL
-  # determine if this is a cold start or a restart (check for restart files)
-  ls "${SRC}"/wrfrst_d??_"${DATESTR}"_??[:_]??[:_]??* >& /dev/null # this only works with globbing expressions, if they are not quoted
+      echo
+      if [[ "${DATASET}" == 'FINAL' ]] || [[ "${DATASET}" == 'LOGS' ]] || [[ "${DATASET}" == 'DIAGS' ]] || [[ "${DATASET}" == 'ATM3D' ]] || [[ "${DATASET}" == 'SNOW' ]] || [[ "${DATASET}" == 'DEL3D' ]] || [[ "${DATASET}" == 'FULL' ]] 
+        then 
+        echo "   >>>   WARNING: Dataset ${DATASET} can not be used in the desired configuration (aborting).   <<< "
+      else 
+        echo "   >>>   WARNING: Dataset ${DATASET} not found (aborting).   <<< "
+      fi 
+      echo
+      return 1
+    fi 
+  fi 
+  
+  # Determine if this is a cold start or a restart (check for restart files)
+  ls "${SRC}"/wrfrst_d??_"${DATESTR}"_??[:_]??[:_]??* >& /dev/null 
+  # NOTE: The above only works with globbing expressions, if they are not quoted. ?????
+  
+  # Skip STATIC, if no globbing is used and this is a restart run ?????
   if [[ $? == 0  ]] && [[ "${GLOB}" != 'GLOB' ]]; then
-      unset STATIC; fi # skip this step, if no globbing is used
-  # cold start: backup data tables, constants, and geogrid files
-  # N.B.: restart files have been added to regular MISC3D
+    unset STATIC; fi 
+  # NOTE: For a cold start, this backups data tables, constants, and geogrid files.
+  
+  # Operation feedback
+  echo  
+  echo "Back up mode: ${MODE}, Date: ${DATENAME}."
   echo
-  # operation feedback
-  echo "   ***   ${MODE} ${DATENAME}   ***   "
-  # delete source or not?
   if [[ ${RMSRC} == 'RMSRC' ]]
     then if [[ ${MODE} == 'RETRIEVE' ]]
-	then echo "  (Overwriting source files!) "
-	else echo " ++  Removing source files!  ++ "
-      fi # $MODE
-    else echo " (leaving source files untouched)   "
-  fi # $RMSRC
-  echo
-  ## process file lists (skip empty ones)
-  if [[ -n "${FINAL}" ]]; then
-    # only executed at the end of an experiment
-    echo '  Static data, logs, and WRF restart files (all domains):'
+      then echo "Overwriting source files! "
+    else echo "Removing source files! "
+    fi 
+  else echo "Leaving source files untouched. "
+  fi   
+  
+  # Process file lists (skip empty ones)
+  if [[ -n "${FINAL}" ]]; then 
+    echo
+    echo 'Static data, logs, and WRF restart files (all domains):'
     "${MODE}HTAR" "wrffinal.tar" "${FINAL}"
     ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${STATIC}" ]]; then
-    # only execute this for the first step/date (cold start)
-    echo '  Static data, WRF constants, and geogrid files (all domains):'
+  fi; if [[ -n "${STATIC}" ]]; then 
+    echo
+    echo 'Static data, WRF constants, and geogrid files (all domains):'
     "${MODE}HTAR" "wrfstatic.tar" "${STATIC}"
     ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${DIAGS}" ]] || [[ -n "${LOGS}" ]]; then
-	echo '  Pressure level and surface fields, log files (all domains):' # short description of archive
-	"${MODE}HTAR" "wrfdiags_${DATENAME}.tar" "${DIAGS} ${LOGS}"
-	ERR=$(( ${ERR} + $? )) # returns the number of missing files as exit code
-  fi; if [[ -n "${MARCIO}" ]]; then
-	echo " Marc's special archive files (MarcIO) (all domains):" # short description of archive
-	"${MODE}HTAR" "wrfmarcIO_${DATENAME}.tar" "${MARCIO}"
-	ERR=$(( ${ERR} + $? )) # returns the number of missing files as exit code
-  fi; if [[ -n "${MISC_D1}" ]] && [[ "${DOMAINS}" == *1* ]]; then
-	echo '  Miscellaneous field, including 3D moisture (1st domain):'
-	"${MODE}HTAR" "wrfmisc_d01_${DATENAME}.tar" "${MISC_D1}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${MISC_D2}" ]] && [[ "${DOMAINS}" == *2* ]]; then
-	echo '  Miscellaneous field, including 3D moisture (2nd domain):'
-	"${MODE}HTAR" "wrfmisc_d02_${DATENAME}.tar" "${MISC_D2}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${MISC_D3}" ]] && [[ "${DOMAINS}" == *3* ]]; then
-	echo '  Miscellaneous field, including 3D moisture (3rd domain):'
-	"${MODE}HTAR" "wrfmisc_d03_${DATENAME}.tar" "${MISC_D3}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${MISC_D4}" ]] && [[ "${DOMAINS}" == *4* ]]; then
-	echo '  Miscellaneous field, including 3D moisture (4th domain):'
-	"${MODE}HTAR" "wrfmisc_d04_${DATENAME}.tar" "${MISC_D4}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${DYN_D1}" ]] && [[ "${DOMAINS}" == *1* ]]; then
-	echo '  3D dry dynamics fields (1st domain):'
-	"${MODE}HTAR" "wrfdrydyn_d01_${DATENAME}.tar" "${DYN_D1}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${DYN_D2}" ]] && [[ "${DOMAINS}" == *2* ]]; then
-	echo '  3D dry dynamics fields (2nd domain):'
-	"${MODE}HTAR" "wrfdrydyn_d02_${DATENAME}.tar" "${DYN_D2}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${DYN_D3}" ]] && [[ "${DOMAINS}" == *3* ]]; then
-	echo '  3D dry dynamics fields (3rd domain):'
-	"${MODE}HTAR" "wrfdrydyn_d03_${DATENAME}.tar" "${DYN_D3}"
-	ERR=$(( ${ERR} + $? ))
-  fi; if [[ -n "${DYN_D4}" ]] && [[ "${DOMAINS}" == *4* ]]; then
-	echo '  3D dry dynamics fields (4th domain):'
-	"${MODE}HTAR" "wrfdrydyn_d04_${DATENAME}.tar" "${DYN_D4}"
-	ERR=$(( ${ERR} + $? ))
+  fi; if [[ "${DOMAINS}" == *1* ]]; then 
+    if [[ -n "${DIAGS_D1}" ]] || [[ -n "${LOGS}" ]]; then
+      echo
+      echo 'Diagnostics (1st domain) and logs:' 
+      "${MODE}HTAR" "wrfdiags_d01_${DATENAME}.tar" "${DIAGS_D1} ${LOGS}"
+      ERR=$(( ${ERR} + $? )) 
+    fi
+  fi; if [[ -n "${DIAGS_D2}" ]] && [[ "${DOMAINS}" == *2* ]]; then
+    echo
+    echo 'Diagnostics (2nd domain):' 
+    "${MODE}HTAR" "wrfdiags_d02_${DATENAME}.tar" "${DIAGS_D2}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${DIAGS_D3}" ]] && [[ "${DOMAINS}" == *3* ]]; then
+    echo
+    echo 'Diagnostics (3rd domain):' 
+    "${MODE}HTAR" "wrfdiags_d03_${DATENAME}.tar" "${DIAGS_D3}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${DIAGS_D4}" ]] && [[ "${DOMAINS}" == *4* ]]; then
+    echo
+    echo 'Diagnostics (4th domain):' 
+    "${MODE}HTAR" "wrfdiags_d04_${DATENAME}.tar" "${DIAGS_D4}"
+    ERR=$(( ${ERR} + $? ))  
+  fi; if [[ -n "${ATM3D_D1}" ]] && [[ "${DOMAINS}" == *1* ]]; then
+    echo
+    echo '3D atmospheric fields and restart files (1st domain):'
+    "${MODE}HTAR" "wrfatm_d01_${DATENAME}.tar" "${ATM3D_D1}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${ATM3D_D2}" ]] && [[ "${DOMAINS}" == *2* ]]; then
+    echo
+    echo '3D atmospheric fields and restart files (2nd domain):'
+    "${MODE}HTAR" "wrfatm_d02_${DATENAME}.tar" "${ATM3D_D2}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${ATM3D_D3}" ]] && [[ "${DOMAINS}" == *3* ]]; then
+    echo
+    echo '3D atmospheric fields and restart files (3rd domain):'
+    "${MODE}HTAR" "wrfatm_d03_${DATENAME}.tar" "${ATM3D_D3}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${ATM3D_D4}" ]] && [[ "${DOMAINS}" == *4* ]]; then
+    echo
+    echo '3D atmospheric fields and restart files (4th domain):'
+    "${MODE}HTAR" "wrfatm_d04_${DATENAME}.tar" "${ATM3D_D4}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${SNOW_D1}" ]] && [[ "${DOMAINS}" == *1* ]]; then
+    echo
+    echo 'Snow (1st domain):'
+    "${MODE}HTAR" "wrfsnow_d01_${DATENAME}.tar" "${SNOW_D1}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${SNOW_D2}" ]] && [[ "${DOMAINS}" == *2* ]]; then
+    echo
+    echo 'Snow (2nd domain):'
+    "${MODE}HTAR" "wrfsnow_d02_${DATENAME}.tar" "${SNOW_D2}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${SNOW_D3}" ]] && [[ "${DOMAINS}" == *3* ]]; then
+    echo
+    echo 'Snow (3rd domain):'
+    "${MODE}HTAR" "wrfsnow_d03_${DATENAME}.tar" "${SNOW_D3}"
+    ERR=$(( ${ERR} + $? ))
+  fi; if [[ -n "${SNOW_D4}" ]] && [[ "${DOMAINS}" == *4* ]]; then
+    echo
+    echo 'Snow (4th domain):'
+    "${MODE}HTAR" "wrfsnow_d04_${DATENAME}.tar" "${SNOW_D4}"
+    ERR=$(( ${ERR} + $? ))
   fi
-  # check for errors
+  
+  # Check for errors
+  echo
   if [[ ${ERR} != 0 ]]; then
-    echo "   >>>   WARNING: there were ${ERR} errors!   <<<   "
+    echo "   >>>   WARNING: There were ${ERR} errors!   <<<   "
     return 1
   else
-    echo "${MODE} ${DATENAME} OK!"
+    echo "${MODE} ${DATENAME} Ok. "
     return 0
   fi
 }
 
-## execution
 
-# set up directories
+# ===============================================================================================
+# =========================================== Execution =========================================
+# ===============================================================================================
+
+# Set up display messaging
+echo
+echo -n "   "
+
+# Set up directories
 hsi mkdir -p "${DST}"
 cd "${SRC}"
 
 # feedback
 echo
+echo '   ================================== Settings =================================='
 echo
-echo '   Settings'
-echo "Operation to perform:       MODE = ${MODE}"
-echo "Delete source files?       RMSRC = ${RMSRC}"
-echo "Verify archive integrity? VERIFY = ${VERIFY}"
-echo "Use globbing expressions:   GLOB = ${GLOB}"
-echo '   Dataset'
-echo "File set to work on:     DATASET = ${DATASET}"
-echo "Domains to include:      DOMAINS = ${DOMAINS}"
-echo "Archiving interval:     INTERVAL = ${INTERVAL}"
-echo '   Data Folders'
-echo 'Archive folder:'
-echo "  DST = ${DST}"
-echo 'Source (disk) folder:'
-echo "  SRC = ${SRC}"
+echo "   Operation to perform:       MODE = ${MODE}."
+echo "   Delete source files?       RMSRC = ${RMSRC}."
+echo "   Verify archive integrity? VERIFY = ${VERIFY}."
+echo "   Use globbing expressions:   GLOB = ${GLOB}."
 echo
+echo '   ================================== Dataset =================================='
+echo
+echo "   File set to work on:     DATASET = ${DATASET}."
+echo "   Domains to include:      DOMAINS = ${DOMAINS}."
+echo "   Archiving interval:     INTERVAL = ${INTERVAL}."
+echo
+echo '   ================================ Data Folders ================================'
+echo
+echo '   Archive folder:'
+echo "      DST = ${DST}."
+echo '   Source (disk) folder:'
+echo "      SRC = ${SRC}."
 echo
 
-# if no TAGS are given, use file pattern to guess
+# If no TAGS are given, use file pattern to guess
+echo '   ================================ Tags ================================'
+echo
 if [[ -z "${TAGS}" ]] && [[ -n "${PATTERN}" ]]; then
-  echo "Inferring TAGS from pattern: PATTERN=${PATTERN}"
-  LST= # detect duplicates
+  echo "   Inferring TAGS from pattern: PATTERN = ${PATTERN}."
+  LST= 
   for T in $( ls *${PATTERN} ); do
     TMP=$( echo "${T%${PATTERN}}" | grep -o "${PATREGX}" )
-    # only add one occurence, no duplcates
+    # NOTE: ${var%string} deletes the shortest match of string in $var from the end.
+    # NOTE: -o means print only the matched (non-empty) parts of a matching line, with 
+    #   each such part on a separate output line.    
     if [[ "$TMP" != "$LST" ]]; then
       TAGS="${TAGS} ${TMP}" 
       LST="${TMP}"
-    fi # $TMP != $LST
-  done # extract $TAG from filename
-  echo "TAGS=${TAGS}"
+    fi
+    # NOTE: This only adds one occurence, no duplcates.
+    # NOTE: This works only because "ls" returns results in a certain order (right? ?????). 
+  done 
+  echo "   Used file pattern to find TAG: "
+  echo "      TAGS = ${TAGS}"
+# If TAGS are given
 else
-  echo "TAGS provided by caller:"
-  echo "TAGS=${TAGS}"
-fi # if no $TAGS
-echo
+  echo "   TAGS provided by the caller:"
+  echo "      TAGS = ${TAGS}"
+fi 
 echo
 
-# set counter
+# Set counters
 ERRORS=0
 OPERATIONS=0
-# cycle over monthly output datasets
-for TAG in ${TAGS} # use WRF log-files as indicator
+
+# Display message
+echo '======================================================================================='
+echo '================================ Performing operations ================================'
+echo '======================================================================================='
+echo
+
+# Cycle over TAGS and process data sets
+for TAG in ${TAGS} 
 do
+  echo "================================ Processing TAG = ${TAG} ================================ "
+  echo
   time -p PROCESSDATASET ${TAG}
   if [ $? == 0 ]; then OPERATIONS=$(( ${OPERATIONS} + 1 ))
   else ERRORS=$(( ${ERRORS} + 1 )); fi
   echo
-  echo '   ==========================================================================   '
+  echo "============================ Finished processing TAG = ${TAG} ============================ "
   echo
 done
-hsi -q ls "${DST}"
 
+# Display message
+echo '======================================================================================='
+echo '================================= Finished operations ================================='
+echo '======================================================================================='
+
+# Display the contents of the archive
+hsi -q ls "${DST}"
+# NOTE: "-q" enables "quiet" mode. In this mode, extraneous messages such as the interactive file 
+#   transfer progress messages, as well as the startup "Message of the Day" are not displayed.
+echo
+
+# Reset signal handeling
 trap - TERM INT
 
-echo
+# Display a message about operation success or failure
 if [ ${ERRORS} == 0 ]; then
-  echo "   <<<   ALL ${OPERATIONS} OPERATIONS OK   >>>   "
+  echo "ALL ${OPERATIONS} OPERATIONS OK. "
   echo
   exit 0
 else
-  echo "   >>>   WARNING: ${ERRORS} OPERATIONS FAILED OR INCOMPLETE!   <<<   "
-  echo "   >>>                 ${OPERATIONS} OPERATIONS OK             <<<   "
+  echo "WARNING: ${ERRORS} OPERATIONS FAILED OR INCOMPLETE! "
+  echo "${OPERATIONS} OPERATIONS OK. "
   echo
-  # /scinet/gpc/bin/exit2msg ${ERRORS} # translate exit codes to human-readable messages
   exit ${ERRORS}
 fi
+
+
+
+
+
+
