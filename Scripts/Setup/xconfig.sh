@@ -38,8 +38,8 @@ IO='fineIO' # This is used for namelist construction and archiving.
 ARSYS='HPSS' 
 # NOTE: If we set ARSYS to '', archiving is not implimented. To do archiving we can  
 #   set this variable to HPSS.
-ARSCRIPT='DEFAULT' 
-# NOTE: Set ARSCRIPT='DEFAULT' to let $IO control archiving. 
+ARSCRIPT='arconfig_wrfout_fineIO_2' 
+# NOTE: Options are arconfig_wrfout_fineIO_1 (old) and arconfig_wrfout_fineIO_2 (recent).
 # NOTE: All CAPS keywords have special meanings, e.g., DEFAULT.
 # NOTE: Archiving is only implimented for fine IO (not default IO).
 # NOTE: If ARSYS is empty, then the ARSCRIPT variable is not important.
