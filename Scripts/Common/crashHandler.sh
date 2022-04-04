@@ -99,35 +99,49 @@ then
         NEW_SNDT=$( echo "${ENU_SNDT}*${CUR_SNDT}/${DEN_SNDT}" | bc ) # Change time_step_sound parameter.
         # NOTE: We need to use bc for floating-point math. bc is a language that supports arbitrary 
         #   precision numbers with interactive execution of statements. There are some similarities 
-        #   in the syntax to the C programming language. 	
-			    
-        # Change namelist entries accordingly
-        cd "${WORKDIR}"
-        sed -i "/time_step/ s/^\s*time_step\s*=\s*[0-9]*.*$/ time_step = ${NEW_DELT}, ! Edited by the auto-restart script; previous value: ${CUR_DELT}./" namelist.input
-        sed -i "/epssm/ s/^\s*epssm\s*=\s*[0-9]\?.[0-9]*.*$/ epssm = ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ! Edited by the auto-restart script; previous value: ${CUR_EPSS}./" namelist.input    
-        sed -i "/time_step_sound/ s/^\s*time_step_sound\s*=\s*[0-9]*.*$/ time_step_sound = ${NEW_SNDT}, ${NEW_SNDT}, ${NEW_SNDT}, ${NEW_SNDT}, ! Edited by the auto-restart script; previous value: ${CUR_SNDT}./" namelist.input
-					
-        # Move into ${INIDIR}
-        cd "${INIDIR}"
+        #   in the syntax to the C programming language. 
         
-        # Prompt on screen
-        echo
-        echo "   Modified namelist parameters for auto-restart.   "    
-        echo "   This is restart attempt number ${RSTCNT} of ${MAXRST}."
-        echo "      TIME_STEP = ${NEW_DELT}."
-        echo "      EPSSM = ${NEW_EPSS}."
-        echo "      TIME_STEP_SOUND = ${NEW_SNDT}."
-        echo
+        # Check if new time step is less than or equal to zero
+        if  [ ${NEW_DELT} -le 0 ]
+        then
+        
+          echo
+          echo "   No auto-restart because new dt becomes zero or negative."
+          echo
+          ERR=$(( ${ERR} + 1 )) # Increase exit code.
+        
+        # If new dt is positive
+        else  	
 			    
-        # Export parameters as needed
-        export RSTDIR # Set in job script; usually output dir.
-        export NEXTSTEP="${CURRENTSTEP}"
-        export NOWPS='NOWPS' # Do not submit another WPS job.
-        export RSTCNT # Restart counter, set above.
+          # Change namelist entries accordingly
+          cd "${WORKDIR}"
+          sed -i "/time_step/ s/^\s*time_step\s*=\s*[0-9]*.*$/ time_step = ${NEW_DELT}, ! Edited by the auto-restart script; previous value: ${CUR_DELT}./" namelist.input
+          sed -i "/epssm/ s/^\s*epssm\s*=\s*[0-9]\?.[0-9]*.*$/ epssm = ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ! Edited by the auto-restart script; previous value: ${CUR_EPSS}./" namelist.input    
+          sed -i "/time_step_sound/ s/^\s*time_step_sound\s*=\s*[0-9]*.*$/ time_step_sound = ${NEW_SNDT}, ${NEW_SNDT}, ${NEW_SNDT}, ${NEW_SNDT}, ! Edited by the auto-restart script; previous value: ${CUR_SNDT}./" namelist.input
+					
+          # Move into ${INIDIR}
+          cd "${INIDIR}"
+        
+          # Prompt on screen
+          echo
+          echo "   Modified namelist parameters for auto-restart.   "    
+          echo "   This is restart attempt number ${RSTCNT} of ${MAXRST}."
+          echo "      TIME_STEP = ${NEW_DELT}."
+          echo "      EPSSM = ${NEW_EPSS}."
+          echo "      TIME_STEP_SOUND = ${NEW_SNDT}."
+          echo
+			    
+          # Export parameters as needed
+          export RSTDIR # Set in job script; usually output dir.
+          export NEXTSTEP="${CURRENTSTEP}"
+          export NOWPS='NOWPS' # Do not submit another WPS job.
+          export RSTCNT # Restart counter, set above.
 			    					
-	# Resubmit job for next step
-        eval "${SCRIPTDIR}/resubJob.sh" # This requires submission command from setup script.
-        ERR=$(( ${ERR} + $? )) # Update exit code.
+	  # Resubmit job for next step
+          eval "${SCRIPTDIR}/resubJob.sh" # This requires submission command from setup script.
+          ERR=$(( ${ERR} + $? )) # Update exit code.
+          
+        fi
 	      
       # Otherwise, e.g., when stability parameters have been changed
       else 
