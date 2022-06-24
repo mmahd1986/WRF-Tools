@@ -407,13 +407,10 @@ WRFEXE=${WRFEXE:-"${WRFSRC}/${WRFSYS}-MPI/${WRFBLD}/Default/wrf.exe"}
 
 # Archive script name (no $ARSCRIPT means no archiving)
 if [[ -n "${IO}" ]]; then
-  if [[ "${ARSCRIPT}" == 'arconfig_wrfout_fineIO_1' ]]; then 
+  if [[ "${ARSCRIPT}" == 'DEFAULT_V1' ]]; then 
     ARSCRIPT="arconfig_wrfout_${IO}_1.${WPSQ}"  
-  elif [[ "${ARSCRIPT}" == 'arconfig_wrfout_fineIO_2' ]]; then 
-    ARSCRIPT="arconfig_wrfout_${IO}_2.${WPSQ}" 
-  else  
-    echo 'ERROR: Archive script not found!' 
-    exit 1  
+  elif [[ "${ARSCRIPT}" == 'DEFAULT_V2' ]]; then 
+    ARSCRIPT="arconfig_wrfout_${IO}_2.${WPSQ}"  
   fi   
 fi  
 
