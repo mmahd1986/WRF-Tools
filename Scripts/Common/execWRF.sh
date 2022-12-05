@@ -221,7 +221,7 @@ then
   fi 
   # Launch wrf.exe
   echo "   Launching WRF executable."
-  eval "time -p ${HYBRIDRUN} ./wrf.exe" &> /dev/null
+  eval "time -p ${HYBRIDRUN} ./wrf.exe"
   wait # Wait for all threads to finish.
   # Check WRF exit status
   echo
