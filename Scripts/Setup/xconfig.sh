@@ -85,6 +85,8 @@ GEODATA='/project/p/peltier/WRF/geog_20210707/'
 DATATYPE='ERA5'
 DATADIR='/project/p/peltier/WRF/ERA5-NA'
 
+# CMIP6 model
+CMIP6MODEL='MPI-ESM1-2-HR'
 
 # ==================================================================================
 # ========================= Email address for job scripts ==========================

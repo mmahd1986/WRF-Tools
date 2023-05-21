@@ -204,6 +204,9 @@ DELT='DEFAULT' # Time decrement for auto restart (DEFAULT: select according to t
 DATADIR='' # Root directory for data.
 DATATYPE='CESM' # Boundary forcing type.
 
+# CMIP6 model
+CMIP6MODEL='MPI-ESM1-2-HR'
+
 # WRFROOT and WRFTOOLS
 WRFROOT="${CODE_ROOT}/WRFV3.9/"
 WRFTOOLS="${CODE_ROOT}/WRF-Tools/"
@@ -318,6 +321,9 @@ fi
 if [[ "${DATATYPE}" == 'CMIP5' ]]; then
   POPMAP=${POPMAP:-'map_gx1v6_to_fv0.9x1.25_aave_da_090309.nc'} 
   METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.CESM'}
+elif [[ "${DATATYPE}" == 'CMIP6' ]]; then
+  VTABLE=${VTABLE:-'Vtable.CMIP6.'${CMIP6MODEL}'.csv'}
+  METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.CMIP6'}
 elif [[ "${DATATYPE}" == 'CESM' ]]; then
   POPMAP=${POPMAP:-'map_gx1v6_to_fv0.9x1.25_aave_da_090309.nc'}
   METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.CESM'}
@@ -352,7 +358,7 @@ if [[ -z "$WRFBLD" ]]; then
   if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]] || [[ "${DATATYPE}" == 'CMIP5' ]]; then
     WRFBLD="Clim-${IO}" # Variable GHG scenarios and no leap-years. ?????
     LLEAP='--noleap' # Option for Python script to omit leap days. 
-  elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'ERA5' ]] || [[ "${DATATYPE}" == 'CFSR' ]] || [[ "${DATATYPE}" == 'NARR' ]]; then
+  elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'ERA5' ]] || [[ "${DATATYPE}" == 'CMIP6' ]] || [[ "${DATATYPE}" == 'CFSR' ]] || [[ "${DATATYPE}" == 'NARR' ]]; then
     WRFBLD="ReA-${IO}" # Variable GHG scenarios with leap-years. ?????
   else
     WRFBLD="Default-${IO}" # Standard WRF build with current I/O version. ?????
@@ -617,6 +623,9 @@ if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]]; then
 elif [[ "${DATATYPE}" == 'CMIP5' ]]; then
   rm -f 'init'
   ln -sf "${DATADIR}/" 'init'  # Initial file directory.
+elif [[ "${DATATYPE}" == 'CMIP6' ]]; then
+  rm -f 'cmip6_data'
+  ln -sf "${DATADIR}/" 'cmip6_data'  # CMIP6 data file directory.  
 elif [[ "${DATATYPE}" == 'CFSR' ]]; then
   rm -f 'plev' 'srfc'
   ln -sf "${DATADIR}/plev/" 'plev' # Pressure level date (3D, 0.5 deg).
@@ -707,6 +716,8 @@ if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]]; then
 elif  [[ "${DATATYPE}" == 'CMIP5' ]]; then
   ln -sf "${WRFTOOLS}/NCL/unCMIP5.ncl"
   ln -sf "${WRFTOOLS}/bin/${WPSSYS}/unccsm.exe"
+elif  [[ "${DATATYPE}" == 'CMIP6' ]]; then
+  ln -sf "${WRFTOOLS}/Python/wrfrun/unCMIP6.py"   
 elif  [[ "${DATATYPE}" == 'ERA5' ]]; then
   ln -sf "${WRFTOOLS}/Python/wrfrun/fixIM.py"
   ln -sf "${UNGRIBEXE}"
