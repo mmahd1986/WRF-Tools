@@ -87,6 +87,7 @@ DATADIR='/project/p/peltier/WRF/ERA5-NA'
 
 # CMIP6 model
 CMIP6MODEL='MPI-ESM1-2-HR'
+CMIP6MDLVER='HIST'
 
 # ==================================================================================
 # ========================= Email address for job scripts ==========================

@@ -206,6 +206,7 @@ DATATYPE='CESM' # Boundary forcing type.
 
 # CMIP6 model
 CMIP6MODEL='MPI-ESM1-2-HR'
+CMIP6MDLVER='HIST'
 
 # WRFROOT and WRFTOOLS
 WRFROOT="${CODE_ROOT}/WRFV3.9/"
@@ -322,7 +323,7 @@ if [[ "${DATATYPE}" == 'CMIP5' ]]; then
   POPMAP=${POPMAP:-'map_gx1v6_to_fv0.9x1.25_aave_da_090309.nc'} 
   METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.CESM'}
 elif [[ "${DATATYPE}" == 'CMIP6' ]]; then
-  VTABLE=${VTABLE:-'Vtable.CMIP6.'${CMIP6MODEL}'.csv'}
+  VTABLE=${VTABLE:-'Vtable.CMIP6.'${CMIP6MODEL}'_'${CMIP6MDLVER}'.csv'}
   METGRIDTBL=${METGRIDTBL:-'METGRID.TBL.CMIP6'}
 elif [[ "${DATATYPE}" == 'CESM' ]]; then
   POPMAP=${POPMAP:-'map_gx1v6_to_fv0.9x1.25_aave_da_090309.nc'}
