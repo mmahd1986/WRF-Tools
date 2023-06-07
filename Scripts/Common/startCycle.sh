@@ -13,7 +13,7 @@ set -e
 
 # Pre-process arguments using getopt
 if [ -z $( getopt -T ) ]; then
-  TMP=$( getopt -o r:gsvqkwlmn:t:N:h --long restart:,clean,nogeo,nostat,verbose,quiet,skipwps,nowait,nowps,norst,setrst:,time:,name:,help -n "$0" -- "$@" ) # Pre-process arguments.
+  TMP=$( getopt -o r:gsvqkwlmn:t:N:h --long restart:,clean,nogeo,nostat,verbose,quiet,skipwps,nowait,nowps,norst,setrst:,wait:,name:,help -n "$0" -- "$@" ) # Pre-process arguments.
   # NOTE: $0 bash parameter is used to reference the name of the shell script. 
   #   So you can use this if you want to print the name of shell script.
   # NOTE: $@ refers to all of a shell script’s command-line arguments.
@@ -32,7 +32,7 @@ NEXTSTEP='' # Next step to be processed (argument to --restart).
 SKIPWPS=0 # Whether or not to run WPS before the first step.
 NOWPS='FALSE' # Passed to WRF.
 RSTCNT=0 # Restart counter.
-WAITTIME='' # Manual override for queue selector (SciNet only; default: 15 minutes). ?????
+WAITTIME=0 # Minimum wait (sleep) time in seconds before WRF job is submitted.
 DEFWCT="00:15:00" # Another variable is necessary to prevent the setup script from changing the value. ?????
 
 # Parse arguments 
@@ -49,7 +49,7 @@ while true; do
     -l | --nowait  )   QWAIT=0; shift;; # Don't wait for WPS to finish.
     -m | --norst   )   RSTCNT=1000; shift;; # Should be enough to prevent restarts.
     -n | --setrst  )   RSTCNT="$2"; shift 2 ;; # (re-)set restart counter.
-    -t | --time    )   WAITTIME="$2"; shift 2 ;; # WRFWCT crashes for some reason. ?????    
+    -t | --wait    )   WAITTIME="$2"; shift 2 ;; # Sleep timer.    
     -N | --name    )   JOBNAME="$2"; shift 2 ;; # Set WRF jobname - just for identification.
     -h | --help    )   echo -e " \
                           \n\
@@ -64,7 +64,7 @@ while true; do
     -l | --nowait      don't wait for WPS to finish (and skip WPS completion check) \n\
     -m | --norst       suppress restarts \n\
     -n | --setrst      (re-)set restart counter \n\
-    -t | --time        maximum wait time for WPS \n\
+    -t | --wait        sleep time (seconds) before submitting WRF job \n\
     -N | --name        set WRF jobname - just for identification \n\
     -h | --help        print this help \n\
                            "; exit 0;; 
@@ -149,10 +149,8 @@ eval "${SCRIPTDIR}/setup_cycle.sh"
 if [ $SKIPWPS == 1 ]; then
   [ $VERBOSITY -gt 0 ] && echo 'Skipping WPS!'
 else  
-  # Handle the wait time for queue selector ($WRFWCT is also set above)
-  if [[ -n "${WAITTIME}" ]]; then 
-    WRFWCT="${WAITTIME}" # Manual override.
-  elif [[ "${WRFWCT}" != '00:00:00' ]] && [[ "${WRFWCT}" != '0' ]]; then
+  # $WRFWCT is set above
+  if [[ "${WRFWCT}" != '00:00:00' ]] && [[ "${WRFWCT}" != '0' ]]; then
     WRFWCT="${DEFWCT}" # Default wait time.
     # NOTE: The above means if WRFWCT is 0, leave it.
   fi 
@@ -161,10 +159,7 @@ else
   [ $VERBOSITY -gt 0 ] && echo "   Submitting WPS/REAL for experiment ${EXP}: NEXTSTEP=${NEXTSTEP}."
   [ $VERBOSITY -gt 0 ] && echo -n -e "\n   "
   # Launch WPS (required vars: INIDIR, NEXTSTEP, WPSSCRIPT and WRFWCT)
-  if [ -z "$ALTSUBWPS" ] || [[ "$MAC" == "$SYSTEM" ]]
-    then eval "${SUBMITWPS}" # On the same machine (default).
-  else eval "${ALTSUBWPS}" # Alternate/remote command.
-  fi   
+  eval "${SUBMITWPS}" # on the same machine (default)
 fi 
 
 # Figure out if we have to wait until WPS job is completed
@@ -203,6 +198,12 @@ if [ $QWAIT == 1 ]; then
     exit 1
   fi 
 fi 
+
+# optional wait before launching WRF
+if [ -n "$WAITTIME" ]; then
+  echo "... sleeping for $WAITTIME seconds..."
+  sleep $WAITTIME
+fi
 
 # Add extra display line, if applicable
 [ $VERBOSITY -gt 0 ] && echo
