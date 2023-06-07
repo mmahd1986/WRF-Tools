@@ -234,7 +234,7 @@ export SUBMITAVG=${SUBMITAVG:-'ssh -o LogLevel=quiet nia-login07 "cd \"${INIDIR}
 export RESUBJOB=${RESUBJOB-'ssh -o LogLevel=quiet nia-login07 "cd \"${INIDIR}\"; sbatch --export=NOWPS=${NOWPS},NEXTSTEP=${NEXTSTEP},RSTCNT=${RSTCNT} ./${WRFSCRIPT}"'} # Evaluated by resubJob.
 
 # Sleeper job submission (for next step when WPS is delayed)
-export SLEEPERJOB=${SLEEPERJOB-'ssh nia-login07 "cd \"${INIDIR}\";  export NOWPS=${NOWPS}; nohup ./${STARTSCRIPT} --time=${WAITTIME} --skipwps --restart=${NEXTSTEP} --name=${JOBNAME} &> ${STARTSCRIPT%.sh}_${JOBNAME}_${NEXTSTEP}.log &"'} # Evaluated by resubJob; relaunches WPS.
+export SLEEPERJOB=${SLEEPERJOB-'ssh nia-login07 "cd \"${INIDIR}\";  export NOWPS=${NOWPS}; nohup ./${STARTSCRIPT} --wait=${WAITTIME} --skipwps --restart=${NEXTSTEP} --name=${JOBNAME} &> ${STARTSCRIPT%.sh}_${JOBNAME}_${NEXTSTEP}.log &"'} # Evaluated by resubJob; relaunches WPS.
 # NOTE: ${variable%A} notation means take the value of $variable, strip off the pattern A from the tail of the value and give the result.
 
 
