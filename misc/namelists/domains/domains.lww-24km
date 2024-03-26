@@ -1,6 +1,6 @@
 &domains
  max_dom                             = 1,
- time_step                           = 85,
+ time_step                           = 90,
  parent_time_step_ratio              = 1,     
  grid_id                             = 1,          
  dx                                  = 24459.04, 

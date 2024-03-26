@@ -131,6 +131,11 @@ class CMIPHandler(object):
         # NOTE: Here we assume that there are no other dots in the input_root other than those
         #   associated with the seperators for the CMIP6 name.
         
+        # Load start and end dates and varnames
+        stL = np.load(input_root+'/startdates.npy',allow_pickle=True)
+        edL = np.load(input_root+'/enddates.npy',allow_pickle=True) 
+        vns = np.load(input_root+'/varnames.npy',allow_pickle=True)
+        
         # The date to be handled 
         self.input_date = datetime.datetime.strptime(inp_date,'%Y%m%d%H')
         # NOTE: The strptime() method creates a datetime object from the given string.
@@ -230,9 +235,13 @@ class CMIPHandler(object):
                         raise ValueError('Error: Files do not have a consistent date format.')
                     startdates.append(datetime.datetime.strptime(stdate,dformat))
                     enddates.append(datetime.datetime.strptime(endate,dformat))        
+                # Actual start and end dates
+                locf = [i for i, x in enumerate(vns) if x==varname]
+                startdatesa = stL[locf][0]; enddatesa = edL[locf][0]    
+                # Find the file
                 ndatefound = 0
                 for i in range(len(startdates)):
-                    if ((startdates[i]<=self.input_date) and (self.input_date<=enddates[i])):
+                    if ((startdatesa[i]<=self.input_date) and (self.input_date<=enddatesa[i])):
                         ndatefound += 1
                         filestartdate = startdates[i]
                         fileenddate = enddates[i]
@@ -243,18 +252,18 @@ class CMIPHandler(object):
                         if ndatefound>1:
                             raise ValueError('Error: Number of files containing item is greater than 1.')
                         else:
-                            if self.input_date<startdates[0]:
+                            if self.input_date<startdatesa[0]:
                                 filestartdate = startdates[0]
                                 fileenddate = enddates[0]
-                            elif enddates[-1]<self.input_date:
+                            elif enddatesa[-1]<self.input_date:
                                 filestartdate = startdates[-1]
                                 fileenddate = enddates[-1]
                             else:
                                 ndatefound2 = 0
                                 for i in range(len(startdates)-1):
-                                    if ((enddates[i]<=self.input_date) and (self.input_date<=startdates[i+1])):
-                                        delt1 = abs(self.input_date-enddates[i])
-                                        delt2 = abs(startdates[i+1]-self.input_date)
+                                    if ((enddatesa[i]<=self.input_date) and (self.input_date<=startdatesa[i+1])):
+                                        delt1 = abs(self.input_date-enddatesa[i])
+                                        delt2 = abs(startdatesa[i+1]-self.input_date)
                                         if abs(delt1-delt2)<=pd.Timedelta(seconds=1):
                                             filestartdate = startdates[i+1]
                                             fileenddate = enddates[i+1]
@@ -332,7 +341,7 @@ class CMIPHandler(object):
             # Read appropriate section of data
             if (varname=='mrsol' or varname=='tsl'):            
                 ds[varname] = ds[varname].sel(depth=self.soildepths[slvl])
-            seltol = '20D' if itm['approx_dates'] else None
+            seltol = '20D' if itm['approx_dates'] else '0'
             if (self.filestrdates[c]!=''):
                 if (varname=='mrsol' or varname=='tsl'):
                     self.ds[varname+str(slvl)] = ds[varname].sel(time=self.input_date,method='nearest',tolerance=seltol)

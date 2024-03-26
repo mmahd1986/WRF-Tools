@@ -59,7 +59,9 @@ then
 
     # Resubmit job for next step
     export WAITTIME=120
+    set -x
     eval "${SLEEPERJOB}" # This requires submission command from setup script.
+    set +x
     ERR=$(( ${ERR} + $? )) # Update exit code.
 
   # Restart if error occurred at run-time, not if it is an initialization error
@@ -67,7 +69,7 @@ then
   then
 
     # If RSTCNT >= MAXRST
-    if [ ${RSTCNT} -ge ${MAXRST} ]; then
+    if [ ${RSTCNT} -gt ${MAXRST} ]; then
     # NOTE: "-ge" means greater than or equal to.
     # NOTE: This happens, if RSTCNT or MAXRST were set incorrectly or not set at all.
       
@@ -90,12 +92,12 @@ then
       CUR_DELT=$(sed -n '/time_step/ s/^\s*time_step\s*=\s*\([0-9]*\).*$/\1/p' namelist.input) # Time step.
       # NOTE: "\s" matches whitespace characters (spaces and tabs). Newlines embedded 
       #   in the pattern will also match.
+      CUR_SNDT=$(sed -n '/time_step_sound/ s/^\s*time_step_sound\s*=\s*\([0-9]*\).*$/\1/p' namelist.input) # Sound time step multiplier.
+      # NOTE: This assumes time_step_sound is an integer.
       CUR_EPSS=$(sed -n '/epssm/ s/^\s*epssm\s*=\s*\([0-9]\?.[0-9]*\).*$/\1/p' namelist.input) # epssm parameter.  
       # NOTE: "\?" is as *, but only matches zero or one times (so that [0-9]\?.5 
       #   matches .5 and 0.5).
-      CUR_SNDT=$(sed -n '/time_step_sound/ s/^\s*time_step_sound\s*=\s*\([0-9]*\).*$/\1/p' namelist.input) # Sound time step multiplier.
-      # NOTE: This assumes time_step_sound is an integer.
-         
+
       # Parse default namelist for stability parameters
       cd "${INIDIR}"
       INI_DELT=$(sed -n '/time_step/ s/^\s*time_step\s*=\s*\([0-9]*\).*$/\1/p' namelist.input) # Time step.
@@ -117,8 +119,8 @@ then
 	
         # Calculate new stability parameters			    
         NEW_DELT=$( echo "${CUR_DELT} - ${DEL_DELT}" | bc ) # Decrease time step by fixed amount.
-        NEW_EPSS=$( echo "1.00 - ${MUL_EPSS}*(1.00 - ${CUR_EPSS})" | bc ) # Increase epssm parameter.
         NEW_SNDT=$( echo "${ENU_SNDT}*${CUR_SNDT}/${DEN_SNDT}" | bc ) # Change time_step_sound parameter.
+        NEW_EPSS=$( echo "1.00 - ${MUL_EPSS}*(1.00 - ${CUR_EPSS})" | bc ) # Increase epssm parameter.
         # NOTE: We need to use bc for floating-point math. bc is a language that supports arbitrary 
         #   precision numbers with interactive execution of statements. There are some similarities 
         #   in the syntax to the C programming language. 
@@ -138,9 +140,16 @@ then
           # Change namelist entries accordingly
           cd "${WORKDIR}"
           sed -i "/time_step/ s/^\s*time_step\s*=\s*[0-9]*.*$/ time_step = ${NEW_DELT}, ! Edited by the auto-restart script; previous value: ${CUR_DELT}./" namelist.input
-          sed -i "/epssm/ s/^\s*epssm\s*=\s*[0-9]\?.[0-9]*.*$/ epssm = ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ! Edited by the auto-restart script; previous value: ${CUR_EPSS}./" namelist.input    
           sed -i "/time_step_sound/ s/^\s*time_step_sound\s*=\s*[0-9]*.*$/ time_step_sound = ${NEW_SNDT}, ${NEW_SNDT}, ${NEW_SNDT}, ${NEW_SNDT}, ! Edited by the auto-restart script; previous value: ${CUR_SNDT}./" namelist.input
-					
+					# some special options that work more aggressively
+          if [ ${RSTCNT} -gt 2 ]; then
+            echo "   RSTCNT > 2: turning off sf_urban_physics and setting epssm = 1."
+            sed -i "/epssm/ s/^\s*epssm\s*=\s*[0-9]\?.[0-9]*.*$/ epssm = 1., 1., 1., 1., ! Edited by the auto-restart script; previous value: ${CUR_EPSS}./" namelist.input    
+            sed -i "/sf_urban_physics/ s/^\s*sf_urban_physics\s*=\s*.*$/ sf_urban_physics = 0., 0., 0., 0., ! Edited by the auto-restart script./" namelist.input    
+          else
+            sed -i "/epssm/ s/^\s*epssm\s*=\s*[0-9]\?.[0-9]*.*$/ epssm = ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ${NEW_EPSS}, ! Edited by the auto-restart script; previous value: ${CUR_EPSS}./" namelist.input    
+          fi # RSTCNT > 2
+          
           # Move into ${INIDIR}
           cd "${INIDIR}"
         
