@@ -122,7 +122,7 @@ then
     find ./meta -maxdepth 1 -name "*sftlf*" -exec cp ${NOCLOBBER} -P {} "${WORKDIR}/sftlf_file.nc" \;
     # cp ${NOCLOBBER} -P "${INIDIR}/MIROC5_ocn2atm_linearweight.nc" "${WORKDIR}/ocn2atmweight_file.nc" # This was commented. Why? ?????     
     find ./meta -maxdepth 1 -name "*linearweight*" -exec cp ${NOCLOBBER} -P {} "${WORKDIR}/ocn2atmweight_file.nc" \;
-  # Copy files/links for source data: CMIP6 projection data
+  # Copy files/links for source data: CMIP6 hist/projection data
   elif [[ "${DATATYPE}" == 'CMIP6' ]]; then
     cp ${NOCLOBBER} -P "${INIDIR}/cmip6_data" "${WORKDIR}"
     cp ${NOCLOBBER} -P "${BINDIR}/unCMIP6.py" "${WORKDIR}"
