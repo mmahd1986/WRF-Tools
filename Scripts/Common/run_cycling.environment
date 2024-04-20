@@ -22,8 +22,9 @@ export AVGSCRIPT="" # Averaging script to be executed after WRF finishes.
 export AVGINTERVAL="" # Default: every time.
 export STARTSCRIPT='startCycle.sh' # startCycle, by default.
 
-# Input data source (needed for treatment of leap years) ?????
+# Input data source (needed for treatment of leap years) 
 export DATATYPE='' # Type of initial and boundary forcing data.
+export LLEAP='' # To have leap days or not (values empty or --noleap).
 
 # Misc settings
 export WAITFORWPS='NO' # Stay on compute node until WPS for next step is finished, in order to submit next WRF job.
