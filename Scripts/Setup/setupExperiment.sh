@@ -379,22 +379,22 @@ WPSBLD=${WPSBLD:-"${WRFBLD}"} # Should be analogous.
 
 # Figure out leap years
 if [[ "${DATATYPE}" == 'CESM' ]] || [[ "${DATATYPE}" == 'CCSM' ]] || [[ "${DATATYPE}" == 'CMIP5' ]]; then 
-  LLEAP='--noleap' # Option for Python script to omit leap days. 
+  LLEAP='' # Option for Python script to omit leap days. 
 elif [[ "${DATATYPE}" == 'ERA-I' ]] || [[ "${DATATYPE}" == 'ERA5' ]] || [[ "${DATATYPE}" == 'CFSR' ]] || [[ "${DATATYPE}" == 'NARR' ]]; then
-  LLEAP='' 
+  LLEAP='LLEAP' 
 elif [[ "${DATATYPE}" == 'CMIP6' ]]; then
   if [[ ${DATADIR} = *MPI-ESM1-2-HR* ]]; then
-	LLEAP=''
+	LLEAP='LLEAP'
   elif [[ ${DATADIR} = *CESM2* ]]; then
-    LLEAP='--noleap' # Option for Python script to omit leap days.  	
+    LLEAP='' # Option for Python script to omit leap days.  	
   else
 	echo 'ERROR: Unknown CMIP6 model - aborting!'; exit 1
   fi  
 else
-  LLEAP='' 
+  LLEAP='LLEAP' 
 fi 
 # Standard or PolarWRF
-if [ ${POLARWRF} == 1 ]; then LLEAP=''; fi
+if [ ${POLARWRF} == 1 ]; then LLEAP='LLEAP'; fi
 # NOTE: We can omit leap days only for GCMs and not reanalyses. Reanalyses usually
 #   have to have the leap days. GCMs usually do not have leap days.
 
@@ -795,7 +795,11 @@ if [[ -n "${CYCLING}" ]]; then
     echo
     echo "Creating new stepfile: Begin=${BEGIN}, End=${END}, Interval=${INT}."    
     # Generate step file
-    python "${GENSTEPS}" ${LLEAP} --interval="${INT}" "${BEGIN}" "${END}" 
+	if [ ${LLEAP} == 'LLEAP' ]; then
+      python "${GENSTEPS}" --interval="${INT}" "${BEGIN}" "${END}"
+    else
+      python "${GENSTEPS}" --noleap --interval="${INT}" "${BEGIN}" "${END}"
+    fi	  
     # NOTE: LLEAP can be set before above. If true, it allows for leap days. We
     #   want to set it to false for GCM calenders without leap days. In the python
     #   script, it is set to true by default. 
