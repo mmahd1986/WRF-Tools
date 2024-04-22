@@ -795,7 +795,7 @@ if [[ -n "${CYCLING}" ]]; then
     echo
     echo "Creating new stepfile: Begin=${BEGIN}, End=${END}, Interval=${INT}."    
     # Generate step file
-	if [ ${LLEAP} == 'LLEAP' ]; then
+	if [[ ${LLEAP} == 'LLEAP' ]]; then
       python "${GENSTEPS}" --interval="${INT}" "${BEGIN}" "${END}"
     else
       python "${GENSTEPS}" --noleap --interval="${INT}" "${BEGIN}" "${END}"
